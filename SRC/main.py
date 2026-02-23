@@ -7,8 +7,6 @@ import search
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-
-# Import our new modules and tools
 import memory
 import brain
 from my_calendar import get_upcoming_events, create_event, delete_event, clear_events_for_day
@@ -53,20 +51,15 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- VOICE INTERCEPTION (NEW) ---
     if update.message.voice:
         print("🎙️ Voice message received. Downloading...")
-        # Tell the user we are processing it so they don't think it froze
         await context.bot.send_chat_action(chat_id=chat_id, action='typing')
         
-        # Grab the file ID from Telegram's servers
         voice_file = await context.bot.get_file(update.message.voice.file_id)
         
-        # Save it temporarily to your home lab
         file_path = f"temp_voice_{update.message.message_id}.ogg"
         await voice_file.download_to_drive(file_path)
         
-        # Transcribe the audio using our new ears.py module
         user_text = ears.transcribe_audio(file_path)
         
-        # Wipe the audio file from your PC so your hard drive doesn't fill up
         if os.path.exists(file_path):
             os.remove(file_path)
             
@@ -181,13 +174,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("🔍 Triggering Web Search Tool...")
             await context.bot.send_chat_action(chat_id=chat_id, action='typing')
             
-            # Clean up the query (e.g., turn "search for python" into "python")
             search_query = user_text.lower().replace("search for", "").replace("search", "").replace("look up", "").strip()
-            
-            # Go fetch the facts from DuckDuckGo
             web_facts = search.search_web(search_query)
-            
-            # Inject the live facts into Llama's system prompt!
             system_msg = {
                 "role": "system",
                 "content": f"You are NhakoBot. Use the following live web results to answer the user's question accurately and conversationally:\n\n{web_facts}"

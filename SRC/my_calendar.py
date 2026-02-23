@@ -4,7 +4,6 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def get_upcoming_events():
@@ -42,7 +41,6 @@ def get_upcoming_events():
         if not events:
             return "No upcoming events found."
 
-        # Format them into a nice string for the AI to read
         calendar_text = "Here is the user's upcoming schedule:\n"
         for event in events:
             start = event["start"].get("dateTime", event["start"].get("date"))
@@ -70,7 +68,6 @@ def create_event(summary, start_time_iso, end_time_iso=None):
     try:
         service = build("calendar", "v3", credentials=creds)
         
-        # If no end time is provided, make it 1 hour long
         if not end_time_iso:
             start_dt = datetime.datetime.fromisoformat(start_time_iso)
             end_dt = start_dt + datetime.timedelta(hours=1)

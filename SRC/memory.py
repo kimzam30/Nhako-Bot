@@ -9,7 +9,6 @@ DB_NAME = "bot_memory"
 DB_USER = "nhako"
 DB_PASS = "ur_secure_password_here" 
 
-# The translator model we just downloaded
 EMBEDDING_MODEL = "nomic-embed-text"
 
 def get_db_connection():
@@ -39,7 +38,6 @@ def init_db():
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         
         # 2. Create the memory table
-        # nomic-embed-text produces vectors with exactly 768 dimensions!
         cur.execute("""
             CREATE TABLE IF NOT EXISTS chat_memory (
                 id SERIAL PRIMARY KEY,
@@ -65,7 +63,6 @@ def get_embedding(text):
 def add_interaction(user_text, ai_response):
     """Saves the conversation to the long-term database."""
     try:
-        # Turn the text into mathematical vectors
         user_vector = get_embedding(user_text)
         ai_vector = get_embedding(ai_response)
         
@@ -96,7 +93,6 @@ def get_history():
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Fetch the 10 most recent messages, ordered properly
         cur.execute("""
             SELECT role, content FROM (
                 SELECT id, role, content FROM chat_memory ORDER BY id DESC LIMIT 10
@@ -123,7 +119,6 @@ def search_memory(query, limit=3):
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # The <=> operator tells pgvector to find the closest vectors (Cosine Distance)
         cur.execute("""
             SELECT role, content 
             FROM chat_memory 
@@ -141,5 +136,4 @@ def search_memory(query, limit=3):
         print(f"❌ Error searching memory: {e}")
         return []
 
-# Run initialization immediately when the file loads!
 init_db()
