@@ -38,3 +38,37 @@ cd Nhako-Bot
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+```
+### 2. Configuration
+- Rename .env.example to .env and add your Telegram Bot Token.
+- Place your Google Cloud credentials.json in the root directory for Calendar access.
+- Start your database instance. Ensure your Tailscale/Localhost IP and passwords match your connection string in src/memory.py.
+
+### 3. Running the Bot
+**For Development (Visible Terminal):**
+
+```Bash
+
+python src/main.py
+```
+### For Production (Invisible Background Service on Windows):
+
+1. Ensure your start_bot.bat is configured correctly.
+2. Double-click silent_runner.vbs to launch the bot windowless.
+3. (Optional) Place a shortcut to silent_runner.vbs in your shell:startup folder for auto-launch on boot.
+
+## 🛠️ Tech Stack
+- Language: Python
+- Framework: python-telegram-bot (v20+)
+- Database: PostgreSQL + pgvector
+- AI Models: Llama 3.2 (Text), Whisper-Base (Audio)
+- APIs: Google Calendar, DuckDuckGo Search
+
+## 🔮 Future Roadmap
+[ ] Implement URL scraping and automatic metadata tagging.
+
+[ ] Add Vision capabilities (llama3.2-vision) for image analysis.
+
+[ ] Integrate homelab server monitoring commands.
+
+Built as a personal homelab AI project by kimzam.
