@@ -1,74 +1,115 @@
-# 🤖 NhakoBot
+# Nhako Bot
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue.svg)
-![Ollama](https://img.shields.io/badge/Ollama-Llama_3.2-black.svg)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
+A self-hosted Telegram assistant that runs entirely on your own hardware — local LLM, local vector memory, local speech-to-text. Nothing is sent to a hosted AI provider.
 
-NhakoBot is a fully localized, multimodal AI Telegram assistant. Built with privacy and local execution in mind, it leverages Llama 3.2 for natural language processing, PostgreSQL for long-term vector memory, and offline acoustic models for voice recognition. 
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_+_pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama_·_Llama_3.2-000000?style=flat-square&logo=ollama&logoColor=white)
+![License](https://img.shields.io/github/license/kimzam30/Nhako-Bot?style=flat-square)
 
-It acts as a personal homelab assistant capable of managing schedules, remembering past context, and searching the live internet.
+---
 
-## ✨ Core Features
+## What it does
 
-* 🧠 **Local LLM Engine:** Powered by Llama 3.2 (via Ollama) for zero-latency, private, and cost-free text generation.
-* 🗄️ **Long-Term Memory (RAG):** Uses a PostgreSQL database with the `pgvector` extension to store and semantically search past chat context.
-* 🎙️ **Voice Transcription:** Intercepts Telegram voice notes and transcribes them entirely offline using `faster-whisper` (CPU-optimized `int8`).
-* 🌐 **Live Web Search:** Bypasses standard LLM training cutoffs by silently querying DuckDuckGo to inject real-time facts into conversations.
-* 📅 **Google Calendar API:** Autonomously reads, creates, and deletes schedule events directly from natural language prompts.
-* 👻 **Invisible Background Service:** Configured to run silently as a headless Windows background process on boot.
+| Capability | How |
+|---|---|
+| **Chat** | Llama 3.2 through Ollama — private, no API bill, no rate limit |
+| **Long-term memory** | Conversations embedded and stored in PostgreSQL with `pgvector`; relevant history is retrieved and injected into the prompt (RAG) |
+| **Voice notes** | Telegram voice messages transcribed offline with `faster-whisper` (CPU-optimised `int8`) |
+| **Live web search** | DuckDuckGo queried on demand so answers aren't capped at the model's training cutoff |
+| **Calendar** | Reads, creates, and deletes Google Calendar events from natural language |
 
-## 🏗️ Architecture
+A small router in `SRC/main.py` inspects each incoming message and dispatches to the right tool before handing context to the model, rather than relying on the LLM to choose.
 
+---
 
-The bot uses a custom Python routing system (built on `python-telegram-bot`) to intercept messages and route them to specific internal tools before passing the context to the LLM. 
+## Layout
 
-## 🚀 Installation & Setup
+```
+Nhako-Bot/
+├── SRC/
+│   ├── main.py           # Telegram handlers and the message router
+│   ├── brain.py          # Ollama chat completion
+│   ├── memory.py         # pgvector storage and semantic retrieval
+│   ├── ears.py           # faster-whisper voice transcription
+│   ├── search.py         # DuckDuckGo lookup
+│   ├── my_calendar.py    # Google Calendar integration
+│   └── check_ollama.py   # Startup health check
+├── Dockerfile
+├── requirements.txt
+├── .env.example
+└── start_bot.bat         # Windows launcher
+```
+
+---
+
+## Setup
 
 ### Prerequisites
-* Python 3.11+
-* Docker (for the PostgreSQL database)
-* Ollama (running `llama3.2`)
-* A Telegram Bot Token (from BotFather)
 
-### 1. Clone & Environment
+- Python 3.11+
+- [Ollama](https://ollama.com) with the model pulled: `ollama pull llama3.2`
+- PostgreSQL with the `pgvector` extension (Docker is the easiest route)
+- A bot token from [@BotFather](https://t.me/botfather)
+- A Google Cloud OAuth client (`credentials.json`) if you want calendar access
+
+### 1. Install
+
 ```bash
-git clone [https://github.com/yourusername/Nhako-Bot.git](https://github.com/yourusername/Nhako-Bot.git)
+git clone https://github.com/kimzam30/Nhako-Bot.git
 cd Nhako-Bot
 python -m venv .venv
-.\.venv\Scripts\activate
+source .venv/bin/activate      # Windows: .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
-### 2. Configuration
-- Rename .env.example to .env and add your Telegram Bot Token.
-- Place your Google Cloud credentials.json in the root directory for Calendar access.
-- Start your database instance. Ensure your Tailscale/Localhost IP and passwords match your connection string in src/memory.py.
 
-### 3. Running the Bot
-**For Development (Visible Terminal):**
+### 2. Database
 
-```Bash
-
-python src/main.py
+```bash
+docker run -d --name nhako-db \
+  -e POSTGRES_PASSWORD=change-me \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
 ```
-### For Production (Invisible Background Service on Windows):
 
-1. Ensure your start_bot.bat is configured correctly.
-2. Double-click silent_runner.vbs to launch the bot windowless.
-3. (Optional) Place a shortcut to silent_runner.vbs in your shell:startup folder for auto-launch on boot.
+Then enable the extension:
 
-## 🛠️ Tech Stack
-- Language: Python
-- Framework: python-telegram-bot (v20+)
-- Database: PostgreSQL + pgvector
-- AI Models: Llama 3.2 (Text), Whisper-Base (Audio)
-- APIs: Google Calendar, DuckDuckGo Search
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
 
-## 🔮 Future Roadmap
-[ ] Implement URL scraping and automatic metadata tagging.
+### 3. Configure
 
-[ ] Add Vision capabilities (llama3.2-vision) for image analysis.
+```bash
+cp .env.example .env
+```
 
-[ ] Integrate homelab server monitoring commands.
+Set your bot token and database connection string. For calendar support, drop `credentials.json` in the project root — the first run opens a browser for consent and caches a token.
 
-Built as a personal homelab AI project by kimzam.
+### 4. Run
+
+```bash
+python SRC/main.py
+```
+
+> The source directory is `SRC/` in capitals. On Linux and macOS the path is case-sensitive, so `python src/main.py` will not work.
+
+### Docker
+
+A `Dockerfile` is included if you'd rather run the bot as a container alongside the database.
+
+---
+
+## Roadmap
+
+- [ ] URL scraping with automatic metadata tagging
+- [ ] Vision support via `llama3.2-vision`
+- [ ] Homelab monitoring commands (container status, disk, uptime)
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Built as a homelab project by **kimzam**.
