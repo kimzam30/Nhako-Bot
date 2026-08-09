@@ -14,7 +14,7 @@ A self-hosted Telegram assistant that runs entirely on your own hardware — loc
 | Capability | How |
 |---|---|
 | **Chat** | Llama 3.2 through Ollama — private, no API bill, no rate limit |
-| **Long-term memory** | Conversations embedded and stored in PostgreSQL with `pgvector`; relevant history is retrieved and injected into the prompt (RAG) |
+| **Long-term memory** | Conversations embedded with `nomic-embed-text` and stored in PostgreSQL with `pgvector`; relevant history is retrieved by cosine distance and injected into the prompt (RAG) |
 | **Voice notes** | Telegram voice messages transcribed offline with `faster-whisper` (CPU-optimised `int8`) |
 | **Live web search** | DuckDuckGo queried on demand so answers aren't capped at the model's training cutoff |
 | **Calendar** | Reads, creates, and deletes Google Calendar events from natural language |
@@ -48,7 +48,12 @@ Nhako-Bot/
 ### Prerequisites
 
 - Python 3.11+
-- [Ollama](https://ollama.com) with the model pulled: `ollama pull llama3.2`
+- [Ollama](https://ollama.com) with **both** models pulled:
+  ```bash
+  ollama pull llama3.2          # chat
+  ollama pull nomic-embed-text  # embeddings for long-term memory
+  ```
+  The memory table is `VECTOR(768)`, which matches `nomic-embed-text`. Swapping the embedding model means changing that dimension too.
 - PostgreSQL with the `pgvector` extension (Docker is the easiest route)
 - A bot token from [@BotFather](https://t.me/botfather)
 - A Google Cloud OAuth client (`credentials.json`) if you want calendar access
@@ -67,16 +72,14 @@ pip install -r requirements.txt
 
 ```bash
 docker run -d --name nhako-db \
+  -e POSTGRES_USER=nhako \
   -e POSTGRES_PASSWORD=change-me \
+  -e POSTGRES_DB=bot_memory \
   -p 5432:5432 \
   pgvector/pgvector:pg16
 ```
 
-Then enable the extension:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
+The `vector` extension and the `chat_memory` table are created automatically on first run by `init_db()`.
 
 ### 3. Configure
 
@@ -84,7 +87,17 @@ CREATE EXTENSION IF NOT EXISTS vector;
 cp .env.example .env
 ```
 
-Set your bot token and database connection string. For calendar support, drop `credentials.json` in the project root — the first run opens a browser for consent and caches a token.
+| Variable | Purpose | Default |
+|---|---|---|
+| `TELEGRAM_TOKEN` | Bot token from BotFather | — |
+| `DB_HOST` | Database host | `localhost` |
+| `DB_PORT` | Database port | `5432` |
+| `DB_NAME` | Database name | `bot_memory` |
+| `DB_USER` | Database user | `nhako` |
+| `DB_PASS` | Database password | empty |
+| `EMBEDDING_MODEL` | Ollama embedding model | `nomic-embed-text` |
+
+For calendar support, drop `credentials.json` in the project root — the first run opens a browser for consent and caches a token.
 
 ### 4. Run
 

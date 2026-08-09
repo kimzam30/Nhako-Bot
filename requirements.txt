@@ -1,6 +1,24 @@
+# Telegram
 python-telegram-bot==20.7
+
+# Local LLM and embeddings (SRC/brain.py, SRC/memory.py)
+ollama
+
+# Long-term vector memory (SRC/memory.py)
+psycopg2-binary
+pgvector
+
+# Offline voice transcription (SRC/ears.py)
+faster-whisper
+
+# Live web search (SRC/search.py)
+duckduckgo-search
+
+# Google Calendar (SRC/my_calendar.py)
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
+
+# Configuration
 python-dotenv

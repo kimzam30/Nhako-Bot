@@ -1,15 +1,19 @@
+import os
+
 import psycopg2
 from pgvector.psycopg2 import register_vector
 import ollama
 
 # --- DATABASE SETTINGS ---
-DB_HOST = "localhost" 
-DB_PORT = "5432"
-DB_NAME = "bot_memory"
-DB_USER = "nhako"
-DB_PASS = "ur_secure_password_here" 
+# Read from the environment so credentials stay out of version control.
+# The defaults match the previous hardcoded values.
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "bot_memory")
+DB_USER = os.getenv("DB_USER", "nhako")
+DB_PASS = os.getenv("DB_PASS", "")
 
-EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
 def get_db_connection():
     """Connects to the PostgreSQL database."""
