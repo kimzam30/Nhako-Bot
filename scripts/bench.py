@@ -261,6 +261,7 @@ def bench_model(client, model, cases):
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # model output has emoji; Windows consoles are cp1252
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("models", nargs="*", help="models to test (default: every pulled model with tool support)")
     p.add_argument("--host", default=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"))
