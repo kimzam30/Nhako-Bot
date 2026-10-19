@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# Pinned by digest so a rebuild gets the exact base that was tested.
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -19,4 +20,9 @@ RUN pip install -r ${REQS}
 COPY nhako ./nhako
 
 USER nhako
+
+# The scheduler loop touches data/heartbeat every 20 s; older than 2 minutes means the bot is stuck.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/app/data/heartbeat') > 120)"]
+
 CMD ["python", "-m", "nhako"]

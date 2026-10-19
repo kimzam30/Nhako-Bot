@@ -15,10 +15,16 @@ services:
       # Published ports on the Windows host. kimzamwrld binds 127.0.0.1 only, which
       # host.docker.internal still reaches (same as Ollama).
       MC_SERVERS: getgud=host.docker.internal:25565,kimzamwrld=host.docker.internal:25566
+      HF_HOME: /app/data/huggingface   # the root filesystem is read-only
     volumes:
       - ./data:/app/data   # nhako.db, token.json, credentials.json, whisper model cache
     networks: [default, docker-proxy]
     depends_on: [docker-proxy]
+    # Hardening: nothing but data/ and /tmp is writable, no Linux capabilities, no setuid.
+    read_only: true
+    tmpfs: [/tmp:size=64m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     # The WSL VM's 28 GB is budgeted for the game servers (.wslconfig). Measured 2026-10-19:
     # 427 MiB peak RSS with whisper base loaded and transcribing, so 512m leaves ~85 MiB.
     # The high oom_score_adj makes the kernel pick this container before any game server.
@@ -30,24 +36,24 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # Read-only window onto Docker for /docker and the homelab alerts: GET /containers only.
-  # Everything else (POST = start/stop/exec, images, networks, volumes...) is refused.
-  # Same image as homepage-socket-proxy, pinned by digest.
+  # Read-only window onto Docker for /docker and the homelab alerts. An allowlist of exactly
+  # the two calls the bot makes: list containers, and one container's stats. Everything else
+  # (inspect, logs, file archives, images, any POST) is refused, and only the bot may connect.
   docker-proxy:
-    image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    image: wollomatic/socket-proxy:1@sha256:3935b709275e4ec35d6ed5a5c4a1f0d01ed31eec5e7234efc3357ecd47689002
     container_name: nhako-docker-proxy
     restart: unless-stopped
-    environment:
-      CONTAINERS: 1
-      POST: 0
-      EVENTS: 0
-      PING: 1
-      VERSION: 0
-      INFO: 0
-      IMAGES: 0
-      NETWORKS: 0
-      VOLUMES: 0
-      EXEC: 0
+    command:
+      - -listenip=0.0.0.0
+      - -allowfrom=nhako
+      - -allowhealthcheck
+      - -shutdowngracetime=5
+      - -allowGET=^(/v[0-9.]+)?/containers/(json|[0-9a-f]{12,64}/stats)$$
+    # Not root: Docker Desktop's socket is root:root 660, so the group is enough.
+    user: "65534:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [docker-proxy]
