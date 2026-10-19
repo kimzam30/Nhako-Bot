@@ -9,7 +9,7 @@ from nhako import scheduler
 from nhako.config import Settings, parse_agenda_time
 from nhako.tools.reminders import set_reminder
 
-from .conftest import KL, NOW  # Monday 19 Oct 2026, 07:30
+from .conftest import KL  # Monday 19 Oct 2026, 07:30
 
 CHAT = 7
 

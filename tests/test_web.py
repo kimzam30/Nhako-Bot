@@ -3,8 +3,7 @@ import httpx
 import pytest
 
 from nhako.agent import Agent
-from nhako.tools import Registry
-from nhako.tools import web
+from nhako.tools import Registry, web
 
 from .conftest import FakeLLM
 

@@ -5,8 +5,9 @@ changes data, returns NeedsConfirm. The bot then shows Confirm/Cancel buttons an
 only calls `tool.execute` once the user presses Confirm.
 """
 import datetime as dt
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from ..config import Settings
 

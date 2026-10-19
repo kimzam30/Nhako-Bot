@@ -232,9 +232,10 @@ def bench_model(client, model, cases):
             row = {"id": case["id"], "lang": case.get("lang", "en"), "error": str(e),
                    "router_ok": False, "tool_ok": False, "args_ok": False, "total_s": 0}
         rows.append(row)
-        mark = lambda k: {True: "ok", False: "XX"}.get(row.get(k), "--")
+        mark = lambda k, row=row: {True: "ok", False: "XX"}.get(row.get(k), "--")
         print(f"  {row['id']:<11} router {mark('router_ok')}  tool {mark('tool_ok')}  args {mark('args_ok')}"
-              f"  {row.get('total_s', 0):5.1f}s  -> {row.get('category')} / {row.get('tool')} {row.get('arguments') or ''}"
+              f"  {row.get('total_s', 0):5.1f}s  -> {row.get('category')} / {row.get('tool')} "
+              f"{row.get('arguments') or ''}"
               + (f"  ERROR {row['error']}" if "error" in row else ""))
 
     en = [r for r in rows if r["lang"] == "en"]

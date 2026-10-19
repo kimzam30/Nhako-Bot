@@ -62,11 +62,11 @@ class Reminder:
 
 
 def _utc_text(when: dt.datetime) -> str:
-    return when.astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return when.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _reminder(row) -> Reminder:
-    due = dt.datetime.strptime(row[3], "%Y-%m-%d %H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    due = dt.datetime.strptime(row[3], "%Y-%m-%d %H:%M:%S").replace(tzinfo=dt.UTC)
     return Reminder(row[0], row[1], row[2], due)
 
 

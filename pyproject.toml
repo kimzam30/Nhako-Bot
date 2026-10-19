@@ -1,9 +1,11 @@
 [project]
 name = "nhako"
-version = "2.0.0.dev0"
+version = "2.0.0"
 description = "Self-hosted Telegram assistant on a local LLM"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+authors = [{ name = "kimzam" }]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -11,3 +13,20 @@ asyncio_default_fixture_loop_scope = "module"
 asyncio_default_test_loop_scope = "module"
 testpaths = ["tests"]
 markers = ["live: needs a running Ollama with the configured model"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, import order, bugbear, pyupgrade
+select = ["F", "E", "W", "I", "B", "UP"]
+ignore = [
+    "E731",  # small lambdas as tool handlers read fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # long fixture strings read better unwrapped
+
+[tool.ruff.lint.isort]
+known-first-party = ["nhako"]

@@ -80,7 +80,7 @@ class Postiz:
                 for i in await self._req("GET", "/integrations")]
 
     async def posts(self, start: dt.datetime, end: dt.datetime) -> list[dict]:
-        utc = dt.timezone.utc
+        utc = dt.UTC
         data = await self._req("GET", "/posts", params={"startDate": start.astimezone(utc).isoformat(),
                                                          "endDate": end.astimezone(utc).isoformat()})
         return sorted(data.get("posts", []), key=lambda p: p.get("publishDate", ""))
@@ -88,7 +88,7 @@ class Postiz:
     async def create_draft(self, content: str, channel_ids: list[str], at: dt.datetime) -> list:
         body = {
             "type": "draft", "shortLink": False, "tags": [],
-            "date": at.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "date": at.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
             # "type": "draft" per post too: Postiz then skips each network's settings checks.
             "posts": [{"type": "draft", "integration": {"id": cid}, "settings": {},
                        "value": [{"content": to_html(content), "image": []}]} for cid in channel_ids],
@@ -131,9 +131,8 @@ def tools(ctx: Context, postiz: Postiz | None = None) -> list[Tool]:
         counts = {}
         for p in posts:
             counts[p.get("state")] = counts.get(p.get("state"), 0) + 1
-        summary = ", ".join(f"{n} {name}" for state, name in
-                            (("QUEUE", "scheduled"), ("PUBLISHED", "published"), ("DRAFT", "draft"), ("ERROR", "failed"))
-                            if (n := counts.get(state)))
+        states = (("QUEUE", "scheduled"), ("PUBLISHED", "published"), ("DRAFT", "draft"), ("ERROR", "failed"))
+        summary = ", ".join(f"{n} {name}" for state, name in states if (n := counts.get(state)))
         lines = [post_line(p, now.tzinfo) for p in posts[:25]]
         more = f"\n…and {len(posts) - 25} more" if len(posts) > 25 else ""
         return Result(f"📣 Postiz, {label}: {summary}\n" + "\n".join(lines) + more)

@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 # Exit codes that mean "someone stopped it", not "it crashed": clean exit, SIGTERM, SIGINT.
 STOPPED_ON_PURPOSE = {0, 130, 143}
+# Servers that hide player names list placeholders with this id.
+ANONYMOUS = "00000000-0000-0000-0000-000000000000"
 
 
 # --- Minecraft ------------------------------------------------------------------------
@@ -61,8 +63,8 @@ async def ping(name: str, address: str, timeout: float = 3.0) -> MCStatus:
         log.info("minecraft %s (%s) not answering: %r", name, address, e)
         return MCStatus(name, online=False)
     p = status.players
-    return MCStatus(name, True, [s.name for s in (p.sample or []) if s.name and s.id != "00000000-0000-0000-0000-000000000000"],
-                    p.online, p.max, status.version.name, status.latency)
+    names = [s.name for s in (p.sample or []) if s.name and s.id != ANONYMOUS]
+    return MCStatus(name, True, names, p.online, p.max, status.version.name, status.latency)
 
 
 def pick_servers(servers: dict[str, str], wanted: str) -> dict[str, str]:
@@ -200,7 +202,7 @@ async def docker_report(docker: Docker, wanted: str = "") -> str:
     hits = hits[:15]
     # RAM only for a handful of containers; stats take a second or two each, so fetch them at once.
     with_ram = [c for c in hits if c.state == "running"] if len(hits) <= 5 else []
-    ram = dict(zip((c.id for c in with_ram), await asyncio.gather(*(docker.memory(c) for c in with_ram))))
+    ram = dict(zip([c.id for c in with_ram], await asyncio.gather(*(docker.memory(c) for c in with_ram)), strict=True))
     lines = []
     for c in hits:
         mem = ram.get(c.id, "")

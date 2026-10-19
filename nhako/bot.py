@@ -10,8 +10,15 @@ import httpx
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
-from telegram.ext import (Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler,
-                          ContextTypes, MessageHandler, filters)
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from . import scheduler
 from .agent import Agent, make_context

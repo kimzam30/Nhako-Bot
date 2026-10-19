@@ -6,8 +6,8 @@ that came due while the bot was down are sent, marked late, as soon as it is bac
 import asyncio
 import datetime as dt
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from .store import Store
 
