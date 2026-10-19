@@ -22,6 +22,7 @@ VERSION = "2025-09-03"  # databases hold "data sources"; pages are created under
 NOT_SET_UP = ("Notion isn't set up. Put NOTION_TOKEN and NOTION_TASKS_DB in .env "
               "(see .env.example) and share the database with the integration.")
 DONE_WORDS = ("done", "complete", "completed", "finished", "selesai")
+MAX_PAGES = 10  # 1,000 open tasks is plenty for a personal list
 TASK_WORDS = FILLER | {"task", "tasks", "todo", "to-do", "mark", "as", "done", "complete", "finished", "tugas"}
 
 
@@ -124,19 +125,22 @@ def parse_page(page: dict, schema: TaskSchema, tz) -> Task:
 
 class Notion:
     def __init__(self, token: str, db: str, transport: httpx.AsyncBaseTransport | None = None):
-        self.token, self.db, self.transport = token, database_id(db), transport
+        self.db = database_id(db)
+        self.client = httpx.AsyncClient(base_url=API, transport=transport, timeout=15,
+                                        headers={"Authorization": f"Bearer {token}", "Notion-Version": VERSION})
         self._source: str | None = None
         self._schema: TaskSchema | None = None
         self._owner: str | None | bool = False  # False: not looked up yet
 
+    async def aclose(self) -> None:
+        await self.client.aclose()
+
     async def _req(self, method: str, path: str, json: dict | None = None) -> dict:
-        headers = {"Authorization": f"Bearer {self.token}", "Notion-Version": VERSION}
-        async with httpx.AsyncClient(base_url=API, transport=self.transport, timeout=15, headers=headers) as c:
-            r = await c.request(method, path, json=json)
-            if r.status_code >= 400:
-                log.warning("notion %s %s -> %s %s", method, path, r.status_code, r.text[:300])
-            r.raise_for_status()
-            return r.json()
+        r = await self.client.request(method, path, json=json)
+        if r.status_code >= 400:
+            log.warning("notion %s %s -> %s %s", method, path, r.status_code, r.text[:300])
+        r.raise_for_status()
+        return r.json()
 
     async def schema(self) -> tuple[str, TaskSchema]:
         if self._schema is None:
@@ -162,7 +166,13 @@ class Notion:
             body["filter"] = f
         if schema.due:
             body["sorts"] = [{"property": schema.due, "direction": "ascending"}]
-        pages = (await self._req("POST", f"/data_sources/{source}/query", body)).get("results", [])
+        pages: list[dict] = []
+        for _ in range(MAX_PAGES):  # Notion returns at most 100 per request
+            resp = await self._req("POST", f"/data_sources/{source}/query", body)
+            pages += resp.get("results", [])
+            if not resp.get("has_more") or not resp.get("next_cursor"):
+                break
+            body["start_cursor"] = resp["next_cursor"]
         return [parse_page(p, schema, tz) for p in pages]
 
     async def add(self, title: str, due: str | None) -> dict:

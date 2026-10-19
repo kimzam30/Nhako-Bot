@@ -17,7 +17,7 @@ def main() -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     logging.getLogger(__name__).info("Nhako starting on %s via %s", settings.ollama_model, settings.ollama_host)
-    build_app(settings).run_polling(drop_pending_updates=True)
+    build_app(settings).run_polling()  # messages sent while the bot was down are answered, not dropped
 
 
 if __name__ == "__main__":

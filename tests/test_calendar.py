@@ -167,9 +167,16 @@ async def test_create_with_unknown_time(tools, cal, ctx):
     assert "couldn't work out" in out.text and cal.inserted == []
 
 
-async def test_list_is_summarized_by_the_model(tools, ctx):
+async def test_list_is_sent_as_is(tools, ctx):
     out = await tools["list_events"].run({"range": "this weekend"}, ctx)
-    assert out.summarize and "Futsal" in out.text and "Lunch with Mum" in out.text
+    assert not out.summarize and "Futsal" in out.text and "Lunch with Mum" in out.text
+
+
+async def test_list_today_includes_events_earlier_today(ctx):
+    early = FakeCalendar(timed("Gym", 19, 6))  # NOW is 07:30 the same day
+    tools = {t.name: t for t in cal_mod.tools(ctx, early)}
+    out = await tools["list_events"].run({"range": "today"}, ctx)
+    assert "Gym" in out.text
 
 
 async def test_missing_token_gives_setup_hint(tools, cal, ctx):

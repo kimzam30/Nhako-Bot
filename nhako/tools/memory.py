@@ -14,8 +14,10 @@ from .calendar import FILLER, MATCH_THRESHOLD, match_score
 MAX_FACTS = 50
 PROMPT_BUDGET = 1500  # characters of facts in the system prompt (num_ctx is 4096 tokens)
 # Never stored: they'd sit in plain text in the database and in every prompt.
-SECRET = re.compile(r"\b(password|passwd|kata laluan|pin|api[ -]?key|token|secret|otp|cvv|card number|"
-                    r"no\.? kad|ic number|no\.? ic|passport number)\b|\d{12,}|\b[A-Za-z0-9_\-]{32,}\b", re.I)
+# "pin" only counts with a number in the fact, so "I collect pin badges" is fine.
+SECRET = re.compile(r"\b(password|passwd|kata laluan|api[ -]?key|token|secret|otp|cvv|card number|"
+                    r"no\.? kad|ic number|no\.? ic|passport number)\b|\bpin\b(?=.*\d)|\d{12,}|"
+                    r"\b[A-Za-z0-9_\-]{32,}\b", re.I)
 FORGET_WORDS = FILLER | {"forget", "remember", "about", "that", "i", "me", "my", "lupakan", "lupa", "fact"}
 
 

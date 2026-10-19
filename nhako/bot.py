@@ -6,7 +6,8 @@ import io
 import logging
 import re
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import httpx
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler,
@@ -16,10 +17,10 @@ from . import scheduler
 from .agent import Agent, make_context
 from .config import Settings
 from .llm import LLM
+from .monitor import Monitor
 from .speech import Transcriber
 from .store import Store
 from .tools import default_registry
-from .monitor import Monitor
 from .tools.calendar import GoogleCalendar, agenda
 from .tools.homelab import Docker, docker_report, mc_report, parse_servers
 from .tools.notion import Notion, tasks_report
@@ -50,6 +51,18 @@ Just talk to me (text or voice):
 /memory shows what I remember about you, tap one to forget it
 /ping checks that my brain and calendar are reachable
 {agenda_line}"""
+
+# The menu Telegram shows when you type "/".
+COMMANDS = [
+    BotCommand("today", "Calendar for today (or: tomorrow, this week...)"),
+    BotCommand("tasks", "Open Notion tasks (or: today, this week, overdue)"),
+    BotCommand("reminders", "Upcoming reminders, tap to cancel"),
+    BotCommand("mc", "Who's online on the Minecraft servers"),
+    BotCommand("docker", "Container and stack health"),
+    BotCommand("memory", "What I remember about you"),
+    BotCommand("ping", "Check the model and integrations"),
+    BotCommand("help", "What I can do"),
+]
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -93,6 +106,8 @@ def to_html(text: str) -> str:
     t = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", t, flags=re.M)  # "## Heading"
     t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
     t = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", t)
+    # [text](https://...) links. The text was escaped above; a quote can't end the href.
+    t = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s\"]+)\)", r'<a href="\2">\1</a>', t)
     return t
 
 
@@ -121,21 +136,29 @@ def memory_buttons(facts) -> InlineKeyboardMarkup:
                                  for fid, text in facts[:30]])
 
 
+def csv(text: str, lower: bool = False) -> set[str]:
+    return {s.strip().lower() if lower else s.strip() for s in text.split(",") if s.strip()}
+
+
 def build_app(settings: Settings) -> Application:
-    llm = LLM(settings.ollama_host, settings.ollama_model, settings.ollama_num_ctx)
+    llm = LLM(settings.ollama_host, settings.ollama_model, settings.ollama_num_ctx,
+              timeout=settings.ollama_timeout, keep_alive=settings.ollama_keep_alive)
     store = Store(settings.db_path)
     ctx = make_context(settings, store)
     cal = GoogleCalendar(ctx)
-    docker = Docker(settings.docker_proxy_url) if settings.docker_proxy_url else None
     servers = parse_servers(settings.mc_servers)
-    notion = Notion(settings.notion_token, settings.notion_tasks_db)         if settings.notion_token and settings.notion_tasks_db else None
-    postiz = Postiz(settings.postiz_url, settings.postiz_api_key)         if settings.postiz_url and settings.postiz_api_key else None
+    docker = notion = postiz = monitor = None
+    if settings.docker_proxy_url:
+        docker = Docker(settings.docker_proxy_url)
+    if settings.notion_token and settings.notion_tasks_db:
+        notion = Notion(settings.notion_token, settings.notion_tasks_db)
+    if settings.postiz_url and settings.postiz_api_key:
+        postiz = Postiz(settings.postiz_url, settings.postiz_api_key)
+    if settings.alerts:
+        monitor = Monitor(store, docker, servers, mc_alert=csv(settings.mc_alert_servers, lower=True),
+                          ignore=csv(settings.alert_ignore), llm=llm)
     agent = Agent(llm, store, default_registry(ctx, cal, docker, notion, postiz), ctx, settings.history_turns)
-    monitor = Monitor(store, docker, servers,
-                      mc_alert={s.strip().lower() for s in settings.mc_alert_servers.split(",") if s.strip()},
-                      ignore={s.strip() for s in settings.alert_ignore.split(",") if s.strip()}) \
-        if settings.alerts else None
-    agenda_time = scheduler.parse_agenda_time(settings.agenda_time)
+    agenda_time = settings.agenda_at
     help_text = HELP.format(model=settings.ollama_model, agenda_line=(
         f"\nEvery morning at {agenda_time:%H:%M} I send you the day's agenda." if agenda_time else ""))
     background: list[asyncio.Task] = []
@@ -249,6 +272,9 @@ def build_app(settings: Settings) -> Application:
                 text = msg.text
             try:
                 reply = await agent.handle(update.effective_chat.id, text)
+            except httpx.TimeoutException:
+                log.warning("model timed out after %ss on %r", settings.ollama_timeout, text[:80])
+                return await send(update, "⌛ My local brain took too long to answer. Try again, or /ping.")
             except Exception:
                 log.exception("handling %r failed", text[:80])
                 return await send(update, "⚠️ My local brain didn't answer. Is Ollama running? Try /ping.")
@@ -278,20 +304,30 @@ def build_app(settings: Settings) -> Application:
 
     async def post_init(app: Application):
         await store.open()
+        with contextlib.suppress(Exception):  # the menu is a nicety; never block startup on it
+            await app.bot.set_my_commands(COMMANDS)
         if problem := await llm.health():
             log.warning("Ollama check failed at startup: %s", problem)
+        else:
+            background.append(asyncio.create_task(llm.warm()))
         background.append(asyncio.create_task(scheduler.run(
             store, lambda chat_id, text: send_to(app.bot, chat_id, text), ctx.now,
-            agenda_time=agenda_time, agenda_chat=settings.allowed_user_id,
-            agenda=morning,
+            agenda_time=agenda_time, agenda_chat=settings.allowed_user_id, agenda=morning,
+            warm=llm.warm, history_keep=settings.history_keep, heartbeat=settings.data_dir / "heartbeat",
             monitor=monitor, alert_chat=settings.allowed_user_id)))
 
     async def post_shutdown(app: Application):
         for task in background:
             task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
+        for client in (docker, notion, postiz):
+            if client is not None:
+                await client.aclose()
         await store.close()
 
-    app = (ApplicationBuilder().token(settings.telegram_token)
+    # Concurrent updates: /today or a button tap answers at once even while the model is busy
+    # with a long web summary. Model calls still queue one at a time inside LLM.
+    app = (ApplicationBuilder().token(settings.telegram_token).concurrent_updates(True)
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(CommandHandler("start", start, filters=me))
     app.add_handler(CommandHandler("help", help_cmd, filters=me))

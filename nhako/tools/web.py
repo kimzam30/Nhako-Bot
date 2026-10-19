@@ -89,12 +89,12 @@ async def fetch(url: str, client: httpx.AsyncClient) -> tuple[str, bytes]:
             ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
             if ctype and not (ctype.startswith("text/") or "html" in ctype or "xml" in ctype):
                 raise FetchError(f"That link is a {ctype} file, not a web page.")
-            body = b""
+            body = bytearray()
             async for chunk in resp.aiter_bytes():
                 body += chunk
                 if len(body) > MAX_BYTES:
                     break
-            return str(resp.url), body[:MAX_BYTES]
+            return str(resp.url), bytes(body[:MAX_BYTES])
     raise FetchError("Too many redirects.")
 
 

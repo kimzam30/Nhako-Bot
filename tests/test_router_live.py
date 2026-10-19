@@ -12,7 +12,6 @@ from nhako.llm import LLM
 from nhako.router import classify
 
 CASES = json.loads((Path(__file__).parent.parent / "scripts" / "bench_cases.json").read_text(encoding="utf-8"))
-NOW_TEXT = "Monday, 19 October 2026, 07:30 AM"
 
 pytestmark = pytest.mark.live
 
@@ -28,7 +27,7 @@ async def llm():
 
 @pytest.fixture(scope="module")
 async def routed(llm):
-    return {c["id"]: await classify(llm, c["text"], NOW_TEXT) for c in CASES}
+    return {c["id"]: await classify(llm, c["text"]) for c in CASES}
 
 
 async def test_overall_router_accuracy(routed):
@@ -59,4 +58,4 @@ async def test_safety_critical_routes(routed, case_id):
     ("what do you remember about me?", "memory"),
 ])
 async def test_phase5_routes(llm, text, category):
-    assert await classify(llm, text, NOW_TEXT) == category, text
+    assert await classify(llm, text) == category, text

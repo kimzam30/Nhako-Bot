@@ -55,7 +55,8 @@ class MCStatus:
 
 async def ping(name: str, address: str, timeout: float = 3.0) -> MCStatus:
     try:
-        status = await asyncio.wait_for(JavaServer.lookup(address, timeout=timeout).async_status(), timeout + 1)
+        server = await JavaServer.async_lookup(address, timeout=timeout)  # async: SRV/DNS can't block the loop
+        status = await asyncio.wait_for(server.async_status(), timeout + 1)
     except Exception as e:  # refused, timeout, bad handshake: all mean "not answering"
         log.info("minecraft %s (%s) not answering: %r", name, address, e)
         return MCStatus(name, online=False)
@@ -119,14 +120,16 @@ class Container:
 
 class Docker:
     def __init__(self, base_url: str, transport: httpx.AsyncBaseTransport | None = None):
-        self.base_url = base_url.rstrip("/")
-        self.transport = transport
+        # One client for the bot's lifetime: the connection to the proxy is reused.
+        self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), transport=transport, timeout=10)
+
+    async def aclose(self) -> None:
+        await self.client.aclose()
 
     async def _get(self, path: str, **params):
-        async with httpx.AsyncClient(base_url=self.base_url, transport=self.transport, timeout=10) as c:
-            r = await c.get(path, params=params)
-            r.raise_for_status()
-            return r.json()
+        r = await self.client.get(path, params=params)
+        r.raise_for_status()
+        return r.json()
 
     async def containers(self) -> list[Container]:
         rows = await self._get("/containers/json", all="true")
@@ -194,9 +197,13 @@ async def docker_report(docker: Docker, wanted: str = "") -> str:
     if not wanted.strip() or not hits:
         prefix = f"No container matches “{wanted}”.\n" if wanted.strip() and not hits else ""
         return prefix + stack_summary(containers)
+    hits = hits[:15]
+    # RAM only for a handful of containers; stats take a second or two each, so fetch them at once.
+    with_ram = [c for c in hits if c.state == "running"] if len(hits) <= 5 else []
+    ram = dict(zip((c.id for c in with_ram), await asyncio.gather(*(docker.memory(c) for c in with_ram))))
     lines = []
-    for c in hits[:15]:
-        mem = await docker.memory(c) if c.state == "running" and len(hits) <= 5 else ""
+    for c in hits:
+        mem = ram.get(c.id, "")
         problem = f" ⚠️ {c.problem()}" if c.problem() else ""
         lines.append(f"{c.icon()} {c.name} ({c.project or 'no stack'}): {c.status}{problem}"
                      + (f", RAM {mem}" if mem else ""))

@@ -1,9 +1,21 @@
 """All settings in one place, read from the environment / .env."""
+import datetime as dt
 from functools import lru_cache
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+OFF = ("", "off", "none", "no", "false")
+
+
+def parse_agenda_time(text: str) -> dt.time | None:
+    """'08:00' -> time(8, 0); '' or 'off' disables the morning agenda."""
+    if (text or "").strip().lower() in OFF:
+        return None
+    hour, _, minute = text.strip().partition(":")
+    return dt.time(int(hour), int(minute or 0))
 
 
 class Settings(BaseSettings):
@@ -17,6 +29,8 @@ class Settings(BaseSettings):
     ollama_host: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:2b"
     ollama_num_ctx: int = 4096
+    ollama_timeout: float = 120         # seconds before a model call is given up
+    ollama_keep_alive: str = "30m"      # how long the model stays in VRAM after a message
 
     timezone: str = "Asia/Kuala_Lumpur"
     agenda_time: str = "08:00"  # morning agenda message; "off" to disable
@@ -40,11 +54,34 @@ class Settings(BaseSettings):
     postiz_api_key: str = ""            # Postiz → Settings → Public API
 
     whisper_model: str = "base"
-    history_turns: int = 6  # user+assistant messages kept as short-term context for chat
+    history_turns: int = 6       # user+assistant messages kept as short-term context for chat
+    history_keep: int = 200      # messages kept per chat in the database; older ones are pruned daily
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"unknown timezone {v!r}, use an IANA name like Asia/Kuala_Lumpur") from None
+        return v
+
+    @field_validator("agenda_time")
+    @classmethod
+    def _check_agenda_time(cls, v: str) -> str:
+        try:
+            parse_agenda_time(v)
+        except ValueError:
+            raise ValueError(f"AGENDA_TIME must be HH:MM (24h) or 'off', not {v!r}") from None
+        return v
 
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    @property
+    def agenda_at(self) -> dt.time | None:
+        return parse_agenda_time(self.agenda_time)
 
     @property
     def db_path(self) -> Path:

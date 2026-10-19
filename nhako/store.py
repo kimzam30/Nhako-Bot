@@ -79,6 +79,9 @@ class Store:
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.db = await aiosqlite.connect(self.path)
+        # WAL: a commit is an append instead of a rewrite, and a crash mid-write can't corrupt the file.
+        await self.db.execute("PRAGMA journal_mode=WAL")
+        await self.db.execute("PRAGMA synchronous=NORMAL")
         await self.db.executescript(SCHEMA)
         await self.db.commit()
         return self
@@ -117,9 +120,21 @@ class Store:
             (action_id, chat_id, f"-{PENDING_MAX_AGE_MINUTES} minutes"),
         ) as cur:
             row = await cur.fetchone()
+        # Deleted whatever chat pressed it: a button pressed from the wrong chat is burned, not kept.
         await self.db.execute("DELETE FROM pending_actions WHERE id = ?", (action_id,))
         await self.db.commit()
         return (row[0], json.loads(row[1])) if row else None
+
+    async def prune(self, keep_messages: int) -> None:
+        """Daily housekeeping: only the newest messages per chat are ever read back, and an
+        expired confirm button can't be pressed, so neither needs to be kept."""
+        await self.db.execute(
+            "DELETE FROM messages WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER "
+            "(PARTITION BY chat_id ORDER BY id DESC) AS n FROM messages) WHERE n > ?)", (keep_messages,))
+        await self.db.execute("DELETE FROM pending_actions WHERE created_at < datetime('now', ?)",
+                              (f"-{PENDING_MAX_AGE_MINUTES} minutes",))
+        await self.db.execute("DELETE FROM reminders WHERE sent = 1 AND due_at < datetime('now', '-30 days')")
+        await self.db.commit()
 
     # --- reminders ---
 

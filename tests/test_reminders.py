@@ -2,7 +2,11 @@
 import dataclasses
 import datetime as dt
 
+import pytest
+from pydantic import ValidationError
+
 from nhako import scheduler
+from nhako.config import Settings, parse_agenda_time
 from nhako.tools.reminders import set_reminder
 
 from .conftest import KL, NOW  # Monday 19 Oct 2026, 07:30
@@ -109,8 +113,40 @@ async def test_agenda_skipped_when_bot_starts_late(store):
     assert out.sent == []
 
 
+async def test_failed_agenda_still_says_good_morning(store):
+    out = Outbox()
+
+    async def broken():
+        raise TimeoutError("google down")
+    await tick(store, out, at(19, 8, 0), agenda_time=dt.time(8, 0), agenda=broken)
+    assert len(out.sent) == 1 and "couldn't load today's agenda" in out.sent[0][1]
+
+
+async def test_model_is_warmed_once_before_the_agenda(store):
+    warmed = []
+
+    async def warm():
+        warmed.append(1)
+    for minute in (54, 56, 57):
+        await tick(store, Outbox(), at(19, 7, minute), agenda_time=dt.time(8, 0), warm=warm)
+    assert warmed == [1]
+
+
+async def test_old_history_is_pruned_daily(store):
+    for i in range(10):
+        await store.add_message(CHAT, "user", f"m{i}")
+    await tick(store, Outbox(), at(19, 9), history_keep=3)
+    assert [m["content"] for m in await store.history(CHAT, 50)] == ["m7", "m8", "m9"]
+
+
 def test_parse_agenda_time():
-    assert scheduler.parse_agenda_time("08:00") == dt.time(8, 0)
-    assert scheduler.parse_agenda_time("7") == dt.time(7, 0)
-    assert scheduler.parse_agenda_time("off") is None
-    assert scheduler.parse_agenda_time("") is None
+    assert parse_agenda_time("08:00") == dt.time(8, 0)
+    assert parse_agenda_time("7") == dt.time(7, 0)
+    assert parse_agenda_time("off") is None
+    assert parse_agenda_time("") is None
+
+
+@pytest.mark.parametrize("bad", ["8am", "8.30", "25:00"])
+def test_bad_agenda_time_is_a_clear_config_error(bad):
+    with pytest.raises(ValidationError, match="AGENDA_TIME"):
+        Settings(_env_file=None, agenda_time=bad)

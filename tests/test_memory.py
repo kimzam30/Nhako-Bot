@@ -163,3 +163,8 @@ async def test_forget_uses_the_message_when_the_model_drifts(tools, mctx):
 async def test_fact_must_mostly_come_from_the_message(tools, mctx, model, said, saved):
     await tools["remember"].run({"fact": model}, dataclasses.replace(mctx, text=said))
     assert [t for _, t in await mctx.store.facts(CHAT)] == [saved]
+
+
+async def test_pin_without_a_number_is_not_a_secret(tools, mctx):
+    out = await tools["remember"].run({"fact": "I collect pin badges"}, mctx)
+    assert "remember" in out.text and await mctx.store.facts(CHAT) != []

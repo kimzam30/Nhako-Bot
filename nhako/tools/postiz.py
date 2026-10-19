@@ -62,17 +62,18 @@ def pick_channels(channels: list[Channel], wanted: str) -> list[Channel]:
 
 class Postiz:
     def __init__(self, base_url: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
-        self.base = base_url.rstrip("/") + "/public/v1"
-        self.api_key, self.transport = api_key, transport
+        self.client = httpx.AsyncClient(base_url=base_url.rstrip("/") + "/public/v1", transport=transport,
+                                        timeout=20, headers={"Authorization": api_key})
+
+    async def aclose(self) -> None:
+        await self.client.aclose()
 
     async def _req(self, method: str, path: str, **kw):
-        async with httpx.AsyncClient(base_url=self.base, transport=self.transport, timeout=20,
-                                     headers={"Authorization": self.api_key}) as c:
-            r = await c.request(method, path, **kw)
-            if r.status_code >= 400:
-                log.warning("postiz %s %s -> %s %s", method, path, r.status_code, r.text[:300])
-            r.raise_for_status()
-            return r.json()
+        r = await self.client.request(method, path, **kw)
+        if r.status_code >= 400:
+            log.warning("postiz %s %s -> %s %s", method, path, r.status_code, r.text[:300])
+        r.raise_for_status()
+        return r.json()
 
     async def channels(self) -> list[Channel]:
         return [Channel(i["id"], i.get("name") or i["identifier"], i["identifier"], bool(i.get("disabled")))

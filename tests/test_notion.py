@@ -185,3 +185,16 @@ async def test_report_for_morning_agenda():
     client = Notion("secret", DB, transport=httpx.MockTransport(FakeNotion()))
     text = await notion.tasks_report(client, NOW, "today")
     assert text.startswith("📝 2 tasks due today:")
+
+
+async def test_open_tasks_follow_pagination(api):
+    first, second = PAGES[:3], PAGES[3:]
+
+    def paged(req: httpx.Request):
+        if req.url.path.endswith("/query"):
+            cursor = json.loads(req.content).get("start_cursor")
+            batch, more = (second, False) if cursor == "c2" else (first, True)
+            return httpx.Response(200, json={"results": batch, "has_more": more, "next_cursor": "c2" if more else None})
+        return api(req)
+    client = Notion("secret", DB, transport=httpx.MockTransport(paged))
+    assert [t.id for t in await client.open_tasks(NOW.tzinfo)] == ["p1", "p2", "p3", "p4", "p5"]

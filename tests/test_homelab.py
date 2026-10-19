@@ -194,3 +194,18 @@ async def test_agent_uses_fallback_instead_of_chat(ctx, store):
     llm = FakeLLM("homelab", tool=None, text="Nextcloud is perfectly healthy!")  # would be made up
     reply = await Agent(llm, store, reg, ctx).handle(1, "is nextcloud healthy?")
     assert reply.text.startswith("🟢 nextcloud (nextcloud): Up 4 days (healthy)")
+
+
+class FakeLLMHealth:
+    def __init__(self, *answers):
+        self.answers = list(answers)
+
+    async def health(self):
+        return self.answers.pop(0)
+
+
+async def test_monitor_alerts_when_ollama_goes_down_and_comes_back(store):
+    m = Monitor(store, None, {}, set(), set(), llm=FakeLLMHealth("can't reach Ollama", "can't reach Ollama", None))
+    assert await m.check() == []  # one failed check is just a blip
+    assert await m.check() == ["🔴 Ollama: can't reach Ollama. Commands like /today and /mc still work."]
+    assert await m.check() == ["✅ Ollama is back, I can think again"]

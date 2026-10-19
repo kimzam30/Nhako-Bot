@@ -3,8 +3,10 @@
 Auth: run `python scripts/google_auth.py` once; it writes data/token.json.
 """
 import asyncio
+import contextlib
 import datetime as dt
 import logging
+import os
 import re
 
 from google.auth.transport.requests import Request
@@ -36,6 +38,8 @@ class GoogleCalendar:
         self.ctx = ctx
         self._service = None
         self._creds: Credentials | None = None
+        # googleapiclient's http (httplib2) isn't thread-safe: one call at a time.
+        self._lock = asyncio.Lock()
 
     def service(self):
         """Blocking - call through asyncio.to_thread."""
@@ -49,13 +53,16 @@ class GoogleCalendar:
                 raise CalendarAuthError(NO_TOKEN)
             self._creds.refresh(Request())
             path.write_text(self._creds.to_json(), encoding="utf-8")  # keep the refreshed token
+            with contextlib.suppress(OSError):  # owner-only; a no-op on Windows
+                os.chmod(path, 0o600)
             self._service = None
         if self._service is None:
             self._service = build("calendar", "v3", credentials=self._creds, cache_discovery=False)
         return self._service
 
     async def _call(self, fn):
-        return await asyncio.to_thread(lambda: fn(self.service()))
+        async with self._lock:
+            return await asyncio.to_thread(lambda: fn(self.service()))
 
     async def list(self, start: dt.datetime, end: dt.datetime) -> list[dict]:
         resp = await self._call(lambda s: s.events().list(
@@ -135,8 +142,7 @@ async def find_events(cal, phrase: str, now: dt.datetime, date_text: str = "") -
     words = [w for w in words if w not in EVERYTHING]
     when = " ".join(x for x in (date_text, dates) if x).strip()
     if when:
-        start, end, label = parse_range(when, now)
-        start = min(start, now.replace(hour=0, minute=0, second=0, microsecond=0)) if label == "today" else start
+        start, end, label = event_range(when, now)
     else:
         start, end, label = now - dt.timedelta(days=1), now + dt.timedelta(days=90), "the next 90 days"
     events = await cal.list(start, end)
@@ -171,11 +177,18 @@ def pick_new_time(new_when: str, event: dict, now: dt.datetime, tz) -> tuple[dt.
 
 # --- tools ----------------------------------------------------------------------------
 
-async def agenda(cal, ctx: Context, range_text: str = "today") -> str:
-    """Plain list of events, no model involved: used by /today and the morning message."""
-    start, end, label = parse_range(range_text, ctx.now())
+def event_range(text: str | None, now: dt.datetime) -> tuple[dt.datetime, dt.datetime, str]:
+    """parse_range, except "today" means the whole day: "what do I have today?" at 14:00 still
+    shows the morning's events."""
+    start, end, label = parse_range(text, now)
     if label == "today":
-        start = start.replace(hour=0, minute=0)
+        start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, end, label
+
+
+async def agenda(cal, ctx: Context, range_text: str = "today") -> str:
+    """Plain list of events, no model involved: used by /today, list_events and the morning message."""
+    start, end, label = event_range(range_text, ctx.now())
     try:
         events = await cal.list(start, end)
     except CalendarAuthError as e:
@@ -202,12 +215,8 @@ def tools(ctx: Context, cal=None) -> list[Tool]:
             return Result(str(e))
 
     async def list_events(args: dict, ctx: Context) -> Result:
-        start, end, label = parse_range(args.get("range"), ctx.now())
-        events = await cal.list(start, end)
-        if not events:
-            return Result(f"Nothing on your calendar for {label}. 🎉")
-        lines = "\n".join(describe(e, tz) for e in events)
-        return Result(f"Calendar events for {label}:\n{lines}", summarize=True)
+        # Sent as-is, like /today: a model rewrite cost another 2-5 s and could garble the events.
+        return Result(await agenda(cal, ctx, args.get("range") or ""))
 
     async def create_event(args: dict, ctx: Context) -> Result:
         title = (args.get("title") or "").strip()

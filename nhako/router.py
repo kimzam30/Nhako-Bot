@@ -3,6 +3,9 @@
 Phase 0 showed a 2B model routes well but picks tools worse when it sees all of them at
 once (docs/REVIVAL_PLAN.md). Any parse problem falls back to plain chat, which is
 always safe: chat can't change anything.
+
+The prompt is deliberately static (no clock time in it): Ollama can then reuse the
+already-processed prompt from the previous message instead of reading it all again.
 """
 import json
 import logging
@@ -58,12 +61,15 @@ SCHEMA = {
 }
 
 
-def router_prompt(now_text: str) -> str:
+def router_prompt() -> str:
     cats = "\n".join(f"- {k}: {v}" for k, v in CATEGORIES.items())
     examples = "\n".join(f'"{text}" -> {cat}' for text, cat in EXAMPLES)
-    return (f"You route messages for Nhako, a personal assistant in Malaysia. It is now {now_text}.\n"
+    return ("You route messages for Nhako, a personal assistant.\n"
             "Classify the user's message into exactly one category. Reply with JSON only.\n"
             f"Categories:\n{cats}\n\nExamples:\n{examples}")
+
+
+PROMPT = router_prompt()
 
 
 def parse_category(raw: str | None) -> str:
@@ -77,7 +83,7 @@ def parse_category(raw: str | None) -> str:
     return cat
 
 
-async def classify(llm: LLM, text: str, now_text: str) -> str:
-    msg = await llm.chat([{"role": "system", "content": router_prompt(now_text)},
-                          {"role": "user", "content": text}], format=SCHEMA)
+async def classify(llm: LLM, text: str) -> str:
+    msg = await llm.chat([{"role": "system", "content": PROMPT}, {"role": "user", "content": text}],
+                         format=SCHEMA)
     return parse_category(msg.content)
