@@ -100,7 +100,7 @@ def test_router_falls_back_to_chat_on_bad_output():
 
 
 def test_router_prompt_lists_every_category():
-    prompt = router_prompt()
+    prompt = router_prompt("Monday")
     assert all(f"- {c}:" in prompt for c in CATEGORIES)
 
 
@@ -121,11 +121,6 @@ def test_split_message():
     assert all(len(p) <= 2000 for p in parts)
     assert "".join(parts).replace(" ", "").replace("\n", "") == long.replace(" ", "").replace("\n", "")
     assert split_message("x" * 5000, limit=4096) == ["x" * 4096, "x" * 904]
-
-
-def test_router_prompt_is_static():
-    """No clock time: the same prompt every message lets Ollama reuse what it already processed."""
-    assert router_prompt() == router_prompt() and "It is now" not in router_prompt()
 
 
 def test_to_html_links():

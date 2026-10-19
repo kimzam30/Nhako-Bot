@@ -30,18 +30,17 @@ class Agent:
     async def _system(self, chat_id: int | None = None) -> dict:
         """With chat_id: the user's saved facts too. Chat only: in Phase 6 tests even one related fact
         ("prefers meetings after 10am") made the 2B model list events instead of moving one.
-        The clock goes last, so the unchanging part stays a reusable prompt prefix."""
-        content = ("You are Nhako, a friendly personal assistant made by Hakim (kimzam). "
-                   "Reply in the user's language (English or Malay), briefly and plainly. "
-                   "Never invent calendar events or facts.")
+        The wording is tuned: moving the clock to the end cost two live routing/tool tests."""
+        content = ("You are Nhako, a friendly personal assistant made by Hakim (kimzam). The user is in "
+                   f"Malaysia (GMT+8). It is now {self._now_text()}. Reply in the user's language "
+                   "(English or Malay), briefly and plainly. Never invent calendar events or facts.")
         if self.store is not None and chat_id is not None:
             if known := facts_prompt(await self.store.facts(chat_id)):
                 content += "\n\n" + known
-        content += f"\n\nThe user's timezone is {self.ctx.settings.timezone}. It is now {self._now_text()}."
         return {"role": "system", "content": content}
 
     async def handle(self, chat_id: int, text: str) -> Reply:
-        category = await router.classify(self.llm, text)
+        category = await router.classify(self.llm, text, self._now_text())
         log.info("route %r -> %s", text[:60], category)
         if category == "chat":
             reply = Reply(await self._chat(chat_id, text))
