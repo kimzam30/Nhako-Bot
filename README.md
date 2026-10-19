@@ -1,4 +1,8 @@
-# Nhako Bot
+<p align="center">
+  <img src="docs/brand/logo-circle.png" alt="Nhako Bot logo: a white pixel-art robot with a dark visor and an antenna, on a teal circle" width="128">
+</p>
+
+<h1 align="center">Nhako Bot</h1>
 
 A private Telegram assistant that runs entirely on your own hardware. A small local LLM (via Ollama) understands English and Malay. Local speech-to-text handles voice notes, and a SQLite file holds its memory. Nothing is sent to a hosted AI provider.
 
