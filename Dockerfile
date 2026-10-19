@@ -1,16 +1,22 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Kuala_Lumpur
+
+RUN useradd --create-home --uid 1000 nhako
 WORKDIR /app
 
-ENV TZ=Asia/Kuala_Lumpur
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# requirements.lock pins every package (including transitive ones like PyAV, whose surprise
+# upgrade once broke voice notes). REQS=requirements.txt is only for regenerating the lock.
+ARG REQS=requirements.lock
+COPY requirements.txt requirements.lock ./
+RUN pip install -r ${REQS}
 
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Only the package: .dockerignore keeps .env, tokens, data/ and the venv out of the image.
+COPY nhako ./nhako
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-CMD ["python", "src/main.py"]
+USER nhako
+CMD ["python", "-m", "nhako"]

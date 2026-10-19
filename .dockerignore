@@ -1,0 +1,7 @@
+# Allowlist: the image needs nothing but these. Secrets (.env, token.json,
+# credentials.json) and data/ must never be baked in.
+*
+!requirements.txt
+!requirements.lock
+!nhako/
+**/__pycache__

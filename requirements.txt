@@ -1,24 +1,26 @@
-# Telegram
-python-telegram-bot==20.7
+# Direct dependencies, pinned to the versions tested on 2026-10-19.
+python-telegram-bot==22.8
+ollama==0.6.3
+aiosqlite==0.22.1
+pydantic-settings==2.16.0
+dateparser==1.4.3
+tzdata==2026.5
 
-# Local LLM and embeddings (SRC/brain.py, SRC/memory.py)
-ollama
+# Voice notes (nhako/speech.py)
+faster-whisper==1.2.1
+# faster-whisper's audio decoder. Pinned: av 19 removed an option faster-whisper 1.2.1
+# passes to av.open(), which broke every voice note (tests/test_speech.py catches it).
+av==18.1.0
 
-# Long-term vector memory (SRC/memory.py)
-psycopg2-binary
-pgvector
+# Web search and page reading (nhako/tools/web.py)
+ddgs==9.16.0
+httpx==0.28.1
+trafilatura==2.3.1
 
-# Offline voice transcription (SRC/ears.py)
-faster-whisper
+# Google Calendar (nhako/tools/calendar.py, scripts/google_auth.py)
+google-api-python-client==2.201.0
+google-auth==2.62.0
+google-auth-oauthlib==1.5.0
 
-# Live web search (SRC/search.py)
-duckduckgo-search
-
-# Google Calendar (SRC/my_calendar.py)
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
-
-# Configuration
-python-dotenv
+# Minecraft server-list ping (nhako/tools/homelab.py)
+mcstatus==14.2.0

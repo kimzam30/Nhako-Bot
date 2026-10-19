@@ -1,15 +1,17 @@
-# Python Environment
+# Python
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 
-# Environment Variables
+# Secrets: never commit these
 .env
-
-# API Keys & Auth
 credentials.json
 token.json
 
-# Temporary Audio Files
-*.ogg
-temp_voice_*.ogg
+# Bot data: database, Google token, whisper cache, backups
+data/
+
+# Benchmark output
+scripts/bench_results/

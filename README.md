@@ -1,11 +1,12 @@
 # Nhako Bot
 
-A self-hosted Telegram assistant that runs entirely on your own hardware — local LLM, local vector memory, local speech-to-text. Nothing is sent to a hosted AI provider.
+A self-hosted Telegram assistant that runs on your own hardware. It uses a local LLM through Ollama, local speech-to-text and a local SQLite database. Nothing goes to a hosted AI provider.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL_+_pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama_·_Llama_3.2-000000?style=flat-square&logo=ollama&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama_·_qwen3.5:2b-000000?style=flat-square&logo=ollama&logoColor=white)
 ![License](https://img.shields.io/github/license/kimzam30/Nhako-Bot?style=flat-square)
+
+> **v2 rewrite in progress.** The roadmap, the hardware notes and the reasons behind each choice are in [docs/REVIVAL_PLAN.md](docs/REVIVAL_PLAN.md).
 
 ---
 
@@ -13,116 +14,125 @@ A self-hosted Telegram assistant that runs entirely on your own hardware — loc
 
 | Capability | How |
 |---|---|
-| **Chat** | Llama 3.2 through Ollama — private, no API bill, no rate limit |
-| **Long-term memory** | Conversations embedded with `nomic-embed-text` and stored in PostgreSQL with `pgvector`; relevant history is retrieved by cosine distance and injected into the prompt (RAG) |
-| **Voice notes** | Telegram voice messages transcribed offline with `faster-whisper` (CPU-optimised `int8`) |
-| **Live web search** | DuckDuckGo queried on demand so answers aren't capped at the model's training cutoff |
-| **Calendar** | Reads, creates, and deletes Google Calendar events from natural language |
+| **Chat** | `qwen3.5:2b` on Ollama, picked by benchmarking on a GTX 1050 Ti ([scripts/bench.py](scripts/bench.py)) |
+| **Calendar** | List, add, move, rename and delete Google Calendar events in plain English or Malay. Changes and deletions always ask first (Confirm / Cancel buttons), and vague names ("the dentist thing") ask *which one* if several match |
+| **Reminders** | "Remind me in 20 minutes to…": the bot messages you on Telegram. They survive restarts. `/reminders` to cancel |
+| **Morning agenda** | Today's events at 08:00 (`AGENDA_TIME`). `/today`, `/today tomorrow` on demand |
+| **Web** | DuckDuckGo search, summarised with source links. Paste a link (or say "open the second link") to have a page read and summarised. Local-network addresses are refused |
+| **Minecraft** | "Who's on getgud?": player names and counts from a server-list ping. `/mc` |
+| **Docker** | "How are my stacks doing?": per-stack status through a read-only socket proxy. `/docker [name]` |
+| **Notion tasks** | "Add renew passport to my tasks by friday", "what's due this week?", "I finished the invoice" (asks first). `/tasks`. Due tasks are in the morning agenda |
+| **Postiz** | "What's going out on social media this week?", "draft a tweet about the server wipe": saved as a **draft** after you confirm, never published by the bot |
+| **Memory** | "Remember that I'm allergic to prawns", "what do you know about me?", "forget the prawn thing" (asks first). Used in conversation. `/memory` shows the facts with a button to remove each. Passwords and card/IC numbers are refused |
+| **Homelab alerts** | A message when a container crashes or turns unhealthy, or getgud stops answering, and again when it recovers |
+| **Voice notes** | Transcribed offline with `faster-whisper` on CPU |
 
-A small router in `SRC/main.py` inspects each incoming message and dispatches to the right tool before handing context to the model, rather than relying on the LLM to choose.
+### How a message is handled
+
+1. **Route.** One quick model call puts the message into a category (`schedule`, `web`, `homelab`, `notion`, `postiz`, `memory`, `chat`).
+2. **Tool call.** The model sees *only* that category's tools and picks one with arguments. Times stay in the user's words ("next tuesday 3pm").
+3. **Run.** Code does the real work, including all date maths ([nhako/timeparse.py](nhako/timeparse.py)). Anything destructive returns a confirmation instead of acting.
+
+Small models stay accurate when they choose from a few tools at a time, and they never do date arithmetic.
 
 ---
 
 ## Layout
 
 ```
-Nhako-Bot/
-├── SRC/
-│   ├── main.py           # Telegram handlers and the message router
-│   ├── brain.py          # Ollama chat completion
-│   ├── memory.py         # pgvector storage and semantic retrieval
-│   ├── ears.py           # faster-whisper voice transcription
-│   ├── search.py         # DuckDuckGo lookup
-│   ├── my_calendar.py    # Google Calendar integration
-│   └── check_ollama.py   # Startup health check
-├── Dockerfile
-├── requirements.txt
-├── .env.example
-└── start_bot.bat         # Windows launcher
+nhako/
+  __main__.py      # python -m nhako
+  bot.py           # Telegram: auth, commands, typing indicator, confirm buttons
+  agent.py         # route -> tool call -> run -> reply
+  router.py        # category classification (JSON-schema output)
+  llm.py           # async Ollama client
+  timeparse.py     # "esok 3 petang" -> datetime
+  store.py         # SQLite: history, pending confirmations, reminders, facts
+  speech.py        # faster-whisper, lazy-loaded
+  config.py        # all settings, from .env
+  scheduler.py     # reminders + morning agenda loop
+  monitor.py       # homelab alerts (changes only)
+  tools/           # one module per integration: calendar, reminders, web, homelab, notion, postiz, memory
+scripts/
+  bench.py         # model benchmark (Phase 0)
+  google_auth.py   # one-time Google consent -> data/token.json
+tests/
 ```
 
 ---
 
 ## Setup
 
-### Prerequisites
-
-- Python 3.11+
-- [Ollama](https://ollama.com) with **both** models pulled:
-  ```bash
-  ollama pull llama3.2          # chat
-  ollama pull nomic-embed-text  # embeddings for long-term memory
-  ```
-  The memory table is `VECTOR(768)`, which matches `nomic-embed-text`. Swapping the embedding model means changing that dimension too.
-- PostgreSQL with the `pgvector` extension (Docker is the easiest route)
-- A bot token from [@BotFather](https://t.me/botfather)
-- A Google Cloud OAuth client (`credentials.json`) if you want calendar access
-
-### 1. Install
+### 1. Ollama (on the host, with the GPU)
 
 ```bash
-git clone https://github.com/kimzam30/Nhako-Bot.git
-cd Nhako-Bot
-python -m venv .venv
-source .venv/bin/activate      # Windows: .\.venv\Scripts\activate
-pip install -r requirements.txt
+winget install --id Ollama.Ollama --exact
+ollama pull qwen3.5:2b
 ```
 
-### 2. Database
+On Pascal cards (GTX 10xx), check that `%LOCALAPPDATA%\Ollama\server.log` has an `inference compute ... library=CUDA` line. Ollama's CUDA 13 build has dropped these cards, and only the CUDA 12 build still supports them.
 
-```bash
-docker run -d --name nhako-db \
-  -e POSTGRES_USER=nhako \
-  -e POSTGRES_PASSWORD=change-me \
-  -e POSTGRES_DB=bot_memory \
-  -p 5432:5432 \
-  pgvector/pgvector:pg16
-```
-
-The `vector` extension and the `chat_memory` table are created automatically on first run by `init_db()`.
-
-### 3. Configure
+### 2. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `TELEGRAM_TOKEN` | Bot token from BotFather | — |
-| `DB_HOST` | Database host | `localhost` |
-| `DB_PORT` | Database port | `5432` |
-| `DB_NAME` | Database name | `bot_memory` |
-| `DB_USER` | Database user | `nhako` |
-| `DB_PASS` | Database password | empty |
-| `EMBEDDING_MODEL` | Ollama embedding model | `nomic-embed-text` |
+Set `TELEGRAM_TOKEN` (from [@BotFather](https://t.me/botfather)) and `ALLOWED_USER_ID` (your numeric id; everyone else is ignored).
 
-For calendar support, drop `credentials.json` in the project root — the first run opens a browser for consent and caches a token.
+### 3. Google Calendar (optional)
 
-### 4. Run
+Create a *Desktop app* OAuth client in Google Cloud and save it as `data/credentials.json`. Then run this once on a machine with a browser:
 
 ```bash
-python SRC/main.py
+python scripts/google_auth.py
 ```
 
-> The source directory is `SRC/` in capitals. On Linux and macOS the path is case-sensitive, so `python src/main.py` will not work.
+It writes `data/token.json`, and the bot refreshes the token itself from then on.
 
-### Docker
+### 4. Notion and Postiz (optional)
 
-A `Dockerfile` is included if you'd rather run the bot as a container alongside the database.
+- **Notion:** create an internal integration at notion.so/profile/integrations and put its secret in `NOTION_TOKEN`. Put your tasks database's URL in `NOTION_TASKS_DB`. On the database page, open ••• → Connections and add the integration.
+- **Postiz:** put the API key from Postiz → Settings → Public API in `POSTIZ_API_KEY`, and your backend URL (ending in `/api`) in `POSTIZ_URL`.
+
+### 5. Run
+
+**Docker (recommended):**
+
+```bash
+docker compose up -d --build
+```
+
+The container reaches Ollama at `host.docker.internal:11434`. It's capped at 512 MB (it peaks at ~430 MiB with whisper loaded) and is the first thing the kernel kills if memory runs out.
+
+**Locally:**
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate            # Linux/macOS: source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m nhako
+```
+
+### Tests
+
+```bash
+pytest -m "not live"              # unit tests, no model needed
+pytest -m live                    # routing against the real local model
+```
+
+In Telegram, `/ping` checks the model and the calendar token.
 
 ---
 
 ## Roadmap
 
-- [ ] URL scraping with automatic metadata tagging
-- [ ] Vision support via `llama3.2-vision`
-- [ ] Homelab monitoring commands (container status, disk, uptime)
+See [docs/REVIVAL_PLAN.md](docs/REVIVAL_PLAN.md). Phases 0–6 are done.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
 
 Built as a homelab project by **kimzam**.

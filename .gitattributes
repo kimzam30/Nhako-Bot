@@ -1,0 +1,5 @@
+# Keep LF everywhere: the Dockerfile and anything run inside the Linux container need it.
+* text=auto eol=lf
+*.ogg binary
+*.png binary
+*.jpg binary

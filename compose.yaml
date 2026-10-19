@@ -1,0 +1,60 @@
+# Nhako bot. Ollama runs natively on Windows (GPU), not in this stack. See docs/REVIVAL_PLAN.md.
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+services:
+  nhako:
+    build: .
+    image: nhako:local
+    container_name: nhako
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OLLAMA_HOST: http://host.docker.internal:11434
+      DOCKER_PROXY_URL: http://nhako-docker-proxy:2375
+      # Published ports on the Windows host. kimzamwrld binds 127.0.0.1 only, which
+      # host.docker.internal still reaches (same as Ollama).
+      MC_SERVERS: getgud=host.docker.internal:25565,kimzamwrld=host.docker.internal:25566
+    volumes:
+      - ./data:/app/data   # nhako.db, token.json, credentials.json, whisper model cache
+    networks: [default, docker-proxy]
+    depends_on: [docker-proxy]
+    # The WSL VM's 28 GB is budgeted for the game servers (.wslconfig). Measured 2026-10-19:
+    # 427 MiB peak RSS with whisper base loaded and transcribing, so 512m leaves ~85 MiB.
+    # The high oom_score_adj makes the kernel pick this container before any game server.
+    mem_limit: 512m
+    oom_score_adj: 800
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # Read-only window onto Docker for /docker and the homelab alerts: GET /containers only.
+  # Everything else (POST = start/stop/exec, images, networks, volumes...) is refused.
+  # Same image as homepage-socket-proxy, pinned by digest.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    container_name: nhako-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+      EVENTS: 0
+      PING: 1
+      VERSION: 0
+      INFO: 0
+      IMAGES: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      EXEC: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker-proxy]
+    mem_limit: 64m
+    oom_score_adj: 800
+    logging: *logging
+
+networks:
+  docker-proxy:
+    internal: true   # only the bot can talk to the proxy; it has no route out

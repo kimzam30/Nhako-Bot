@@ -1,0 +1,38 @@
+[
+  {"id": "cal-add-1", "text": "remind me to call mum tomorrow at 9am", "category": "schedule", "tool": "set_reminder", "alt_tools": ["create_event"], "args": {"what": ["mum"], "when": ["tomorrow"]}},
+  {"id": "cal-add-2", "text": "add dentist appointment next tuesday 3pm", "category": "schedule", "tool": "create_event", "args": {"title": ["dentist"], "when": ["tuesday"]}},
+  {"id": "cal-add-3", "text": "book futsal with the boys this saturday 8pm for 2 hours", "category": "schedule", "tool": "create_event", "args": {"title": ["futsal"], "when": ["saturday"]}},
+  {"id": "cal-read-1", "text": "what do I have today?", "category": "schedule", "tool": "list_events", "args": {"range": ["today"]}},
+  {"id": "cal-read-2", "text": "am I free on friday afternoon", "category": "schedule", "tool": "list_events", "args": {"range": ["friday"]}},
+  {"id": "cal-read-3", "text": "what's on my schedule next week", "category": "schedule", "tool": "list_events", "args": {"range": ["next week"]}},
+  {"id": "cal-edit-1", "text": "move my dentist appointment to 5pm", "category": "schedule", "tool": "update_event", "args": {"event": ["dentist"], "new_when": ["5"]}},
+  {"id": "cal-edit-2", "text": "rename tomorrow's meeting to Postiz sync", "category": "schedule", "tool": "update_event", "args": {"event": ["meeting"], "new_title": ["postiz"]}},
+  {"id": "cal-del-1", "text": "remove the dentist thing", "category": "schedule", "tool": "delete_event", "args": {"event": ["dentist"]}},
+  {"id": "cal-del-2", "text": "cancel everything on sunday", "category": "schedule", "tool": "delete_event", "args": {"event|date": ["sunday"]}},
+  {"id": "rem-1", "text": "ping me in 20 minutes to take the laundry out", "category": "schedule", "tool": "set_reminder", "args": {"what": ["laundry"], "when": ["20"]}},
+
+  {"id": "web-1", "text": "search for the latest Paper MC 1.21 release notes", "category": "web", "tool": "web_search", "args": {"query": ["paper"]}},
+  {"id": "web-2", "text": "what's the weather like in Kuala Lumpur this weekend", "category": "web", "tool": "web_search", "args": {"query": ["kuala lumpur", "kl"]}},
+  {"id": "web-3", "text": "summarise this page https://docs.docker.com/compose/how-tos/startup-order/", "category": "web", "tool": "read_url", "args": {"url": ["docs.docker.com"]}},
+  {"id": "web-4", "text": "how much is a used RTX 3060 12GB going for in Malaysia right now", "category": "web", "tool": "web_search", "args": {"query": ["3060"]}},
+
+  {"id": "lab-1", "text": "who's on getgud right now?", "category": "homelab", "tool": "mc_status", "args": {"server": ["getgud"]}},
+  {"id": "lab-2", "text": "is the minecraft server up", "category": "homelab", "tool": "mc_status", "args": {}},
+  {"id": "lab-3", "text": "how are my docker stacks doing", "category": "homelab", "tool": "docker_status", "args": {}},
+  {"id": "lab-4", "text": "is nextcloud healthy?", "category": "homelab", "tool": "docker_status", "args": {"name": ["nextcloud"]}},
+
+  {"id": "postiz-1", "text": "what posts are scheduled on postiz this week", "category": "postiz", "tool": "postiz_list_posts", "args": {}},
+  {"id": "postiz-2", "text": "draft a post announcing getgud season 2 is live", "category": "postiz", "tool": "postiz_draft_post", "args": {"content": ["season 2", "getgud"]}},
+
+  {"id": "notion-1", "text": "add 'renew domain' to my notion tasks", "category": "notion", "tool": "notion_add_task", "args": {"title": ["domain"]}},
+  {"id": "notion-2", "text": "what tasks are due in notion this week", "category": "notion", "tool": "notion_query_tasks", "args": {}},
+
+  {"id": "chat-1", "text": "how do I remove a coffee stain from a white shirt", "category": "chat"},
+  {"id": "chat-2", "text": "what should I put in my CV for a junior dev role", "category": "chat"},
+  {"id": "chat-3", "text": "I'm doing some research on homelab backups, any tips?", "category": "chat"},
+  {"id": "chat-4", "text": "tell me a joke about minecraft creepers", "category": "chat"},
+
+  {"id": "ms-1", "text": "ingatkan aku pukul 3 petang esok untuk bayar bil api", "category": "schedule", "tool": "set_reminder", "alt_tools": ["create_event"], "args": {"what": ["bil", "api", "bill", "electric"], "when": ["esok", "tomorrow", "3"]}, "lang": "ms"},
+  {"id": "ms-2", "text": "siapa online kat getgud sekarang", "category": "homelab", "tool": "mc_status", "args": {"server": ["getgud"]}, "lang": "ms"},
+  {"id": "ms-3", "text": "aku ada apa-apa plan tak hari sabtu ni", "category": "schedule", "tool": "list_events", "args": {"range": ["sabtu", "saturday"]}, "lang": "ms"}
+]
