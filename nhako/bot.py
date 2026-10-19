@@ -30,7 +30,7 @@ from .store import Store
 from .tools import default_registry
 from .tools.calendar import GoogleCalendar, agenda
 from .tools.homelab import Docker, docker_report, mc_report, parse_servers
-from .tools.notion import Notion, tasks_report
+from .tools.notion import Notion, morning_tasks, overdue_nudge, projects_report, stats_text, tasks_report, weekly_review
 from .tools.postiz import Postiz
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,9 @@ Just talk to me (text or voice):
 • "search for Paper 1.21 release notes"
 • "who's on getgud?" / "is nextcloud healthy?"
 • "add renew passport to my tasks by friday" / "what's due this week?" / "I finished the invoice"
+• "move the landing page task to in progress" / "push bug fixes to friday" / "remove the thumbnail task"
+• "how far along are my projects?" / "set Nhako Beam progress to 50%" / "pause NeraOS" / "how much XP this week?"
+• "what's in the Nhako Depot page?"
 • "remember that I prefer meetings after 10am" / "what do you know about me?"
 • "what's going out on social media this week?" / "draft a tweet about the server wipe" (saved as a draft)
 
@@ -54,7 +57,9 @@ Just talk to me (text or voice):
 /reminders shows reminders you can cancel
 /mc [server] shows who's online
 /docker [name] shows your containers
-/tasks [today, this week, overdue] lists your open Notion tasks
+/tasks [today, this week, overdue, in progress] lists your open Notion tasks
+/projects [all] shows your Notion projects and how far along they are
+/stats [this week, this month, all time] shows tasks cleared, XP and your level
 /memory shows what I remember about you, tap one to forget it
 /ping checks that my brain and calendar are reachable
 {agenda_line}"""
@@ -63,6 +68,8 @@ Just talk to me (text or voice):
 COMMANDS = [
     BotCommand("today", "Calendar for today (or: tomorrow, this week...)"),
     BotCommand("tasks", "Open Notion tasks (or: today, this week, overdue)"),
+    BotCommand("projects", "Notion projects and their progress (or: all)"),
+    BotCommand("stats", "Tasks cleared, XP and level (or: this month, all time)"),
     BotCommand("reminders", "Upcoming reminders, tap to cancel"),
     BotCommand("mc", "Who's online on the Minecraft servers"),
     BotCommand("docker", "Container and stack health"),
@@ -184,9 +191,15 @@ def build_app(settings: Settings) -> Application:
         await send(update, "\n".join([
             f"🧠 {settings.ollama_model}: " + ("ok" if brain is None else f"❌ {brain}"),
             "📅 Google Calendar: " + ("token present" if calendar else "❌ not set up (scripts/google_auth.py)"),
-            "📝 Notion: " + await check(notion and notion.schema(), "NOTION_TOKEN / NOTION_TASKS_DB"),
+            "📝 Notion: " + await notion_check(),
             "📣 Postiz: " + await check(postiz and postiz.channels(), "POSTIZ_URL / POSTIZ_API_KEY"),
         ]))
+
+    async def notion_check() -> str:
+        result = await check(notion and notion.project_schema(), "NOTION_TOKEN / NOTION_TASKS_DB")
+        if result == "ok":
+            return "ok (tasks + projects)" if await notion.project_schema() else "ok (tasks only)"
+        return result
 
     async def check(call, env: str) -> str:
         if call is None:
@@ -201,13 +214,32 @@ def build_app(settings: Settings) -> Application:
     async def morning() -> str:
         text = await agenda(cal, ctx, "today")
         if notion is not None:
-            tasks = await tasks_report(notion, ctx.now(), "today")  # due today, overdue included
-            if not tasks.startswith("✅"):
+            if tasks := await morning_tasks(notion, ctx.now()):  # overdue, today, next days, in progress
                 text += "\n\n" + tasks
         return text
 
     async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, await tasks_report(notion, ctx.now(), " ".join(context.args)))
+
+    async def projects_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, await projects_report(notion, " ".join(context.args)))
+
+    async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if notion is None:
+            await send(update, await tasks_report(None, ctx.now()))  # says how to set Notion up
+            return
+        try:
+            await send(update, await stats_text(notion, ctx.now(), " ".join(context.args)))
+        except Exception:
+            log.exception("stats failed")
+            await send(update, "⚠️ I couldn't read your Notion stats.")
+
+    jobs: list[scheduler.Job] = []
+    if notion is not None and (review := settings.weekly_review_at):
+        jobs.append(scheduler.Job("weekly_review_sent", review[1], lambda: weekly_review(notion, ctx.now()),
+                                  weekday=review[0]))
+    if notion is not None and (nudge := settings.overdue_nudge_at):
+        jobs.append(scheduler.Job("nudge_sent", nudge, lambda: overdue_nudge(notion, ctx.now(), store)))
 
     async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, await agenda(cal, ctx, " ".join(context.args) or "today"))
@@ -321,7 +353,7 @@ def build_app(settings: Settings) -> Application:
             store, lambda chat_id, text: send_to(app.bot, chat_id, text), ctx.now,
             agenda_time=agenda_time, agenda_chat=settings.allowed_user_id, agenda=morning,
             warm=llm.warm, history_keep=settings.history_keep, heartbeat=settings.data_dir / "heartbeat",
-            monitor=monitor, alert_chat=settings.allowed_user_id)))
+            monitor=monitor, alert_chat=settings.allowed_user_id, jobs=jobs)))
 
     async def post_shutdown(app: Application):
         for task in background:
@@ -344,6 +376,8 @@ def build_app(settings: Settings) -> Application:
     app.add_handler(CommandHandler("mc", mc, filters=me))
     app.add_handler(CommandHandler("docker", docker_cmd, filters=me))
     app.add_handler(CommandHandler("tasks", tasks_cmd, filters=me))
+    app.add_handler(CommandHandler("projects", projects_cmd, filters=me))
+    app.add_handler(CommandHandler("stats", stats_cmd, filters=me))
     app.add_handler(CommandHandler("memory", memory_cmd, filters=me))
     app.add_handler(MessageHandler(me & (filters.TEXT | filters.VOICE) & ~filters.COMMAND, on_message))
     app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no):\d+$"))

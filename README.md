@@ -15,11 +15,16 @@ A private Telegram assistant that runs entirely on your own hardware. A small lo
 |---|---|---|
 | 📅 **Calendar** | "what do I have tomorrow?", "add dentist next tuesday 3pm", "move the dentist to 5pm", "remove the dentist thing" | Google Calendar. Moves and deletes always show **Confirm / Cancel** first. Vague names ask *which one* when several match |
 | ⏰ **Reminders** | "remind me in 20 minutes to take the laundry out", "ingatkan saya esok 9 pagi" | Sent by the bot on Telegram. Survive restarts; anything missed while offline arrives marked *late* |
-| ☀️ **Morning agenda** | — | Today's events and due Notion tasks every morning at `AGENDA_TIME` |
+| ☀️ **Morning agenda** | — | Today's events, plus Notion tasks that are overdue, due today, due in the next 3 days or in progress, every morning at `AGENDA_TIME` |
+| 📊 **Weekly review** | — | Tasks cleared, XP and level, projects and what's overdue, at `WEEKLY_REVIEW` (Sunday 20:00) |
+| ⏰ **Overdue nudges** | — | Once a day at `OVERDUE_NUDGE_TIME`, tasks that just went overdue (each one only once) |
 | 🌐 **Web** | "search for Paper 1.21 release notes", paste any link | DuckDuckGo plus page reading, summarised with source links. Local-network addresses are refused |
 | 🎮 **Minecraft** | "who's on getgud?" | Player names and counts from a server-list ping |
 | 🐳 **Docker** | "is nextcloud healthy?", "how are my stacks?" | Per-stack health through a read-only, allowlisted socket proxy |
-| 📝 **Notion tasks** | "add renew passport to my tasks by friday", "what's due this week?", "I finished the invoice" | Marking done asks first |
+| 📝 **Notion tasks** | "add renew passport to my tasks by friday", "what's due this week?", "I finished the invoice", "move the landing page task to in progress", "remove the thumbnail task" | Every change asks first; removing moves the page to Notion's trash |
+| ✏️ **Task edits** | "push the bug fixes quest to friday", "make it a boss quest", "rename the thumbnail quest to File previews", "update bug fixes: half done" | A note also goes into the page body as a dated log; finished tasks can be reopened |
+| 🗺️ **Notion projects** | "how far along are my projects?", "what's left in Octomations?", "set Nhako Beam progress to 50%", "pause NeraOS", "start a new project called Nhako Radio" | Needs a relation from the tasks database to a projects database |
+| 🏆 **XP & pages** | "how much XP this week?", "what's my level?", "what's in my Nhako Depot page?" | XP comes from the database's own XP formula; pages are only those shared with the integration |
 | 📣 **Postiz** | "what's going out on social media this week?", "draft a tweet about the server wipe" | Saved as a **draft** after you confirm. The bot never publishes |
 | 🧠 **Memory** | "remember that I'm allergic to prawns", "what do you know about me?" | Only saved when you ask. Passwords, PINs, keys and IC/card numbers are refused |
 | 🚨 **Alerts** | — | A message when a container crashes or turns unhealthy, a Minecraft server stops answering or Ollama goes down, and again when it recovers |
@@ -32,7 +37,9 @@ Commands answer instantly and never touch the model, so they work even while Oll
 | Command | Does |
 |---|---|
 | `/today [tomorrow, this week, friday…]` | Calendar for a day or range |
-| `/tasks [today, this week, overdue]` | Open Notion tasks |
+| `/tasks [today, this week, overdue, in progress]` | Open Notion tasks |
+| `/projects [all]` | Notion projects and their progress |
+| `/stats [this week, this month, all time]` | Tasks cleared, XP and level |
 | `/reminders` | Upcoming reminders, tap one to cancel it |
 | `/mc [server]` | Who's online on the Minecraft servers |
 | `/docker [name]` | Container and stack health |
@@ -126,7 +133,7 @@ Set `TELEGRAM_TOKEN` and `ALLOWED_USER_ID`. Everyone else is ignored and logged.
   python scripts/google_auth.py
   ```
   It writes `data/token.json`, and the bot refreshes the token itself from then on.
-- **Notion.** Create an internal integration at notion.so/profile/integrations and put its secret in `NOTION_TOKEN`. Put your tasks database's URL in `NOTION_TASKS_DB`. On the database page, open ••• → Connections and add the integration. Any database with a title, a date and a status or checkbox column works.
+- **Notion.** Create an internal integration at notion.so/profile/integrations and put its secret in `NOTION_TOKEN`. Put your tasks database's URL in `NOTION_TASKS_DB`. On the database page, open ••• → Connections and add the integration. Any database with a title, a date and a status or checkbox column works. If it has a relation to a projects database (like Quests → Campaigns), the bot follows it: it can list projects, add tasks to one, and write a percentage into the projects database's number column (e.g. `Manual %`) to set progress.
 - **Postiz.** Put the API key from Postiz → Settings → Public API in `POSTIZ_API_KEY`, and your backend URL (ending in `/api`) in `POSTIZ_URL`.
 
 ### 5. Run
@@ -166,6 +173,8 @@ All settings come from `.env` (see [.env.example](.env.example)). Inside Docker,
 | `OLLAMA_KEEP_ALIVE` | `30m` | How long the model stays in VRAM after a message |
 | `TIMEZONE` | `Asia/Kuala_Lumpur` | IANA timezone for all dates |
 | `AGENDA_TIME` | `08:00` | Morning agenda time (24h), or `off` |
+| `WEEKLY_REVIEW` | `sun 20:00` | Weekly Notion review, day and time, or `off` |
+| `OVERDUE_NUDGE_TIME` | `18:00` | Daily overdue-task ping (24h), or `off` |
 | `MC_SERVERS` | `getgud=127.0.0.1:25565` | `name=host:port`, comma-separated |
 | `MC_ALERT_SERVERS` | `getgud` | Servers that alert when they stop answering |
 | `DOCKER_PROXY_URL` | *(empty)* | Read-only Docker socket proxy; empty disables `/docker` |

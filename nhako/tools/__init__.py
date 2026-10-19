@@ -74,13 +74,18 @@ class Registry:
     # fn(text, ctx) -> category or None: a second opinion when the router says "chat", for
     # messages code can recognise with certainty (e.g. "I finished X" where X is an open task).
     rescues: list[Callable[[str, Context], Awaitable[str | None]]] = field(default_factory=list)
+    # fn(text, ctx) -> category or None, asked BEFORE the router: for messages code can place with
+    # certainty that the small router gets wrong ("pause NeraOS" -> homelab, "how much XP" -> chat).
+    claims: list[Callable[[str, Context], Awaitable[str | None]]] = field(default_factory=list)
 
-    def add(self, category: str, tools: list[Tool], fallback=None, rescue=None) -> None:
+    def add(self, category: str, tools: list[Tool], fallback=None, rescue=None, claim=None) -> None:
         self.by_category.setdefault(category, []).extend(tools)
         if fallback:
             self.fallbacks[category] = fallback
         if rescue:
             self.rescues.append(rescue)
+        if claim:
+            self.claims.append(claim)
 
     def schemas(self, category: str) -> list[dict]:
         return [t.schema() for t in self.by_category.get(category, [])]
@@ -100,8 +105,10 @@ def default_registry(ctx: Context, cal=None, docker=None, notion=None, postiz=No
     reg.add("schedule", calendar.tools(ctx, cal) + reminders.tools(ctx))
     reg.add("web", web.tools(ctx))
     reg.add("homelab", homelab.tools(ctx, docker), fallback=homelab.guess)
-    reg.add("notion", notion_tools.tools(ctx, notion), fallback=notion_tools.guess,
-            rescue=notion_tools.rescue(notion))
+    # One category for tasks and projects: a separate "projects" category made the 2B router send
+    # task messages to schedule/memory/homelab (live tests, Oct 2026).
+    reg.add("notion", notion_tools.tools(ctx, notion) + notion_tools.project_tools(ctx, notion),
+            fallback=notion_tools.guess, rescue=notion_tools.rescue(notion), claim=notion_tools.claim(notion))
     reg.add("postiz", postiz_tools.tools(ctx, postiz))
     reg.add("memory", memory.tools(ctx))
     return reg

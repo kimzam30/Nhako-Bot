@@ -18,6 +18,19 @@ def parse_agenda_time(text: str) -> dt.time | None:
     return dt.time(int(hour), int(minute or 0))
 
 
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def parse_weekly(text: str) -> tuple[int, dt.time] | None:
+    """'sun 20:00' -> (6, time(20, 0)); '' or 'off' disables it."""
+    if (text or "").strip().lower() in OFF:
+        return None
+    day, _, clock = text.strip().lower().partition(" ")
+    if day[:3] not in DAYS or not clock.strip():
+        raise ValueError(text)
+    return DAYS.index(day[:3]), parse_agenda_time(clock)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -34,6 +47,8 @@ class Settings(BaseSettings):
 
     timezone: str = "Asia/Kuala_Lumpur"
     agenda_time: str = "08:00"  # morning agenda message; "off" to disable
+    weekly_review: str = "sun 20:00"   # Notion week in review (tasks cleared, XP, projects); "off" to disable
+    overdue_nudge_time: str = "18:00"  # daily ping for Notion tasks that just went overdue; "off" to disable
 
     # Everything the bot writes lives under data_dir (a Docker volume in compose.yaml).
     data_dir: Path = Path("data")
@@ -75,6 +90,24 @@ class Settings(BaseSettings):
             raise ValueError(f"AGENDA_TIME must be HH:MM (24h) or 'off', not {v!r}") from None
         return v
 
+    @field_validator("overdue_nudge_time")
+    @classmethod
+    def _check_nudge_time(cls, v: str) -> str:
+        try:
+            parse_agenda_time(v)
+        except ValueError:
+            raise ValueError(f"OVERDUE_NUDGE_TIME must be HH:MM (24h) or 'off', not {v!r}") from None
+        return v
+
+    @field_validator("weekly_review")
+    @classmethod
+    def _check_weekly_review(cls, v: str) -> str:
+        try:
+            parse_weekly(v)
+        except ValueError:
+            raise ValueError(f"WEEKLY_REVIEW must be like 'sun 20:00' or 'off', not {v!r}") from None
+        return v
+
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
@@ -82,6 +115,14 @@ class Settings(BaseSettings):
     @property
     def agenda_at(self) -> dt.time | None:
         return parse_agenda_time(self.agenda_time)
+
+    @property
+    def weekly_review_at(self) -> tuple[int, dt.time] | None:
+        return parse_weekly(self.weekly_review)
+
+    @property
+    def overdue_nudge_at(self) -> dt.time | None:
+        return parse_agenda_time(self.overdue_nudge_time)
 
     @property
     def db_path(self) -> Path:

@@ -60,6 +60,29 @@ CASES += [
      "tool": "list_posts", "args": {"when": ["tomorrow"]}},
 ]
 
+# Hakim's Hub: moving, removing, and project progress.
+CASES += [
+    {"id": "hub-progress", "category": "notion", "text": "move the landing page task to in progress",
+     "tool": "update_task", "args": {"task": ["landing"], "status": ["progress"]}},
+    {"id": "hub-remove", "category": "notion", "text": "remove the thumbnail task", "tool": "remove_task",
+     "args": {"task": ["thumbnail"]}},
+    {"id": "hub-percent", "category": "notion", "text": "set Nhako Beam progress to 50%",
+     "tool": "update_project", "args": {"project": ["beam"], "percent": ["50"]}},
+    {"id": "hub-projects", "category": "notion", "text": "how far along are my projects?", "tool": "list_projects"},
+    {"id": "hub-due", "category": "notion", "text": "push the bug fixes quest to friday", "tool": "update_task",
+     "args": {"task": ["bug"], "due": ["friday"]}},
+    {"id": "hub-tag", "category": "notion", "text": "make the bug fixes quest a boss quest", "tool": "update_task",
+     "args": {"task": ["bug"], "tag|status": ["boss"]}},
+    {"id": "hub-pause", "category": "notion", "text": "pause NeraOS", "tool": "update_project",
+     "args": {"project": ["nera"], "status": ["pause"]}},
+    {"id": "hub-new", "category": "notion", "text": "start a new project called Nhako Radio",
+     "tool": "add_project", "args": {"name": ["radio"]}},
+    {"id": "hub-xp", "category": "notion", "text": "how much XP did I get this week?", "tool": "quest_stats",
+     "args": {"period": ["week"]}},
+    {"id": "hub-read", "category": "notion", "text": "what's in my Nhako Depot page?", "tool": "read_notion",
+     "args": {"page": ["depot"]}},
+]
+
 # Phase 6: memory.
 CASES += [
     {"id": "p6-remember", "category": "memory", "text": "remember that I prefer meetings after 10am",

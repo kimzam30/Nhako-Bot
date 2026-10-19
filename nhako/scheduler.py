@@ -1,4 +1,5 @@
-"""Background loop: deliver due reminders, the morning agenda and homelab alerts.
+"""Background loop: deliver due reminders, the morning agenda, daily/weekly jobs (weekly review,
+overdue nudges) and homelab alerts.
 
 Everything it needs is in SQLite, so a restart (or a crash) loses nothing: reminders
 that came due while the bot was down are sent, marked late, as soon as it is back.
@@ -6,7 +7,8 @@ that came due while the bot was down are sent, marked late, as soon as it is bac
 import asyncio
 import datetime as dt
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from .store import Store
@@ -22,9 +24,37 @@ WARM_AHEAD = dt.timedelta(minutes=5)  # load the model just before the agenda, w
 Send = Callable[[int, str], Awaitable[None]]
 
 
+@dataclass
+class Job:
+    """A message sent once a day (or once a week on `weekday`, 0 = Monday) at `at`, if `build`
+    has something to say. `key` remembers the last day it ran, so a restart never repeats it."""
+    key: str
+    at: dt.time
+    build: Callable[[], Awaitable[str | None]]
+    weekday: int | None = None
+
+
+async def run_job(job: Job, store: Store, send: Send, chat_id: int, now: dt.datetime) -> None:
+    if job.weekday is not None and now.weekday() != job.weekday:
+        return
+    due = dt.datetime.combine(now.date(), job.at, now.tzinfo)
+    today = now.date().isoformat()
+    if not (due <= now < due + AGENDA_GRACE) or await store.get(job.key) == today:
+        return
+    await store.set(job.key, today)  # set first: never twice, even if building or sending fails
+    try:
+        text = await job.build()
+    except Exception:
+        log.exception("building %s failed", job.key)
+        return
+    if text:
+        await send(chat_id, text)
+
+
 async def tick(store: Store, send: Send, now: dt.datetime, *, agenda_time: dt.time | None,
                agenda_chat: int, agenda: Callable[[], Awaitable[str]],
-               warm: Callable[[], Awaitable[None]] | None = None, history_keep: int = 200) -> None:
+               warm: Callable[[], Awaitable[None]] | None = None, history_keep: int = 200,
+               jobs: Sequence[Job] = ()) -> None:
     for r in await store.due_reminders(now):
         late = now - r.due_at
         note = f" (late by {_ago(late)}, I was offline)" if late > LATE_AFTER else ""
@@ -49,6 +79,12 @@ async def tick(store: Store, send: Send, now: dt.datetime, *, agenda_time: dt.ti
                 log.exception("building the morning agenda failed")
                 text = "⚠️ I couldn't load today's agenda. Details are in the log; try /today later."
             await send(agenda_chat, "☀️ Good morning!\n" + text)
+
+    for job in jobs:
+        try:
+            await run_job(job, store, send, agenda_chat, now)
+        except Exception:  # one broken job never blocks the others or the reminders
+            log.exception("job %s failed", job.key)
 
     if await store.get("pruned") != today:
         await store.set("pruned", today)

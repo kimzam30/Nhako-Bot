@@ -40,7 +40,7 @@ class Agent:
         return {"role": "system", "content": content}
 
     async def handle(self, chat_id: int, text: str) -> Reply:
-        category = await router.classify(self.llm, text, self._now_text())
+        category = await self._claim(text) or await router.classify(self.llm, text, self._now_text())
         if category == "chat":
             category = await self._rescue(text) or category
         log.info("route %r -> %s", text[:60], category)
@@ -53,6 +53,17 @@ class Agent:
         await self.store.add_message(chat_id, "user", text)
         await self.store.add_message(chat_id, "assistant", reply.text)
         return reply
+
+    async def _claim(self, text: str) -> str | None:
+        """A category code is sure about before asking the router (skips a model call too)."""
+        for claim in self.registry.claims:
+            try:
+                if category := await claim(text, self.ctx):
+                    log.info("claimed %r for %s", text[:60], category)
+                    return category
+            except Exception:
+                log.exception("claim check failed for %r", text[:60])
+        return None
 
     async def _rescue(self, text: str) -> str | None:
         """A category code is sure about, for a message the router called chat."""

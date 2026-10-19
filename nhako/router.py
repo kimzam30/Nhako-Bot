@@ -20,8 +20,8 @@ CATEGORIES = {
     "postiz": "the user's social media (Postiz): what posts are scheduled or published, "
               "write/draft a post, tweet, LinkedIn or Instagram caption "
               "(whether the Postiz app itself is up or running is homelab)",
-    "notion": "the user's to-do / task list in Notion: add a task, what's due, what's left to do, "
-              "mark a task done",
+    "notion": "the user's to-do / task list and projects in Notion: add a task, what's due, what's left to do, "
+              "mark a task done or in progress, remove a task, project progress",
     "memory": "the user asks Nhako to remember or forget a fact about them, or asks what Nhako "
               "remembers about them",
     "chat": "anything else: general knowledge, advice, tips and how-to on ANY topic (including servers, "
@@ -44,6 +44,7 @@ EXAMPLES = [
     ("what's the latest Docker Desktop version", "web"),
     ("put 'renew passport' on my to-do list", "notion"),
     ("I finished the invoice task", "notion"),
+    ("set the website project to 70%", "notion"),
     ("anything going out on social media tomorrow?", "postiz"),
     ("write a tweet about the server wipe", "postiz"),
     ("remember that I'm allergic to prawns", "memory"),

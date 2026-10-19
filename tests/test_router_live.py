@@ -57,6 +57,13 @@ async def test_safety_critical_routes(routed, case_id):
     ("remind me to service my car on saturday", "schedule"),    # remind, not remember
     ("forget what I told you about prawns", "memory"),
     ("what do you remember about me?", "memory"),
+    ("set Nhako Beam progress to 50%", "notion"),
+    ("move the landing page task to in progress", "notion"),
+    ("remove the thumbnail task", "notion"),                    # a task, not a calendar event
+    ("how far along are my projects?", "notion"),
+    ("start a new project called Nhako Radio", "notion"),
+    # "pause NeraOS", "how much XP...", "...quest to friday", "...Depot page" are placed by
+    # notion.claim before the router ever sees them: tests/test_notion.py::test_claim.
 ])
 async def test_phase5_routes(llm, text, category):
     assert await classify(llm, text, NOW_TEXT) == category, text

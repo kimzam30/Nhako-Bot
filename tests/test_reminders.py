@@ -150,3 +150,67 @@ def test_parse_agenda_time():
 def test_bad_agenda_time_is_a_clear_config_error(bad):
     with pytest.raises(ValidationError, match="AGENDA_TIME"):
         Settings(_env_file=None, agenda_time=bad)
+
+
+# --- daily / weekly jobs (weekly review, overdue nudges) ---
+
+def job(key="review", hour=20, weekday=None, text="📊 review", log=None):
+    async def build():
+        if log is not None:
+            log.append(key)
+        if isinstance(text, Exception):
+            raise text
+        return text
+    return scheduler.Job(key, dt.time(hour, 0), build, weekday)
+
+
+async def test_weekly_job_only_on_its_day_and_once(store):
+    out = Outbox()
+    jobs = [job(weekday=6)]  # Sunday; the 19th is a Monday
+    await tick(store, out, at(19, 20, 0), jobs=jobs)
+    assert out.sent == []
+    await tick(store, out, at(25, 19, 59), jobs=jobs)
+    await tick(store, out, at(25, 20, 0), jobs=jobs)
+    await tick(store, out, at(25, 20, 30), jobs=jobs)
+    assert out.sent == [(CHAT, "📊 review")]
+
+
+async def test_daily_job_with_nothing_to_say_sends_nothing_and_isnt_retried(store):
+    out, ran = Outbox(), []
+    jobs = [job("nudge", 18, text=None, log=ran)]
+    await tick(store, out, at(19, 18, 0), jobs=jobs)
+    await tick(store, out, at(19, 18, 1), jobs=jobs)
+    assert out.sent == [] and ran == ["nudge"]
+    await tick(store, out, at(20, 18, 0), jobs=jobs)  # next day: runs again
+    assert ran == ["nudge", "nudge"]
+
+
+async def test_job_skipped_when_bot_starts_late(store):
+    out = Outbox()
+    await tick(store, out, at(19, 23, 30), jobs=[job(hour=18)])
+    assert out.sent == []
+
+
+async def test_broken_job_doesnt_stop_the_others(store):
+    out = Outbox()
+    jobs = [job("broken", 18, text=RuntimeError("notion down")), job("fine", 18, text="ok")]
+    await tick(store, out, at(19, 18, 0), jobs=jobs)
+    assert out.sent == [(CHAT, "ok")]
+
+
+def test_parse_weekly():
+    from nhako.config import parse_weekly
+    assert parse_weekly("sun 20:00") == (6, dt.time(20, 0))
+    assert parse_weekly("Friday 9") == (4, dt.time(9, 0))
+    assert parse_weekly("off") is None
+    s = Settings(_env_file=None)
+    assert s.weekly_review_at == (6, dt.time(20, 0)) and s.overdue_nudge_at == dt.time(18, 0)
+
+
+@pytest.mark.parametrize("field, bad, name", [
+    ("weekly_review", "sunday", "WEEKLY_REVIEW"), ("weekly_review", "someday 20:00", "WEEKLY_REVIEW"),
+    ("overdue_nudge_time", "6pm", "OVERDUE_NUDGE_TIME"),
+])
+def test_bad_job_times_are_clear_config_errors(field, bad, name):
+    with pytest.raises(ValidationError, match=name):
+        Settings(_env_file=None, **{field: bad})
