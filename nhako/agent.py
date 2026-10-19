@@ -41,6 +41,8 @@ class Agent:
 
     async def handle(self, chat_id: int, text: str) -> Reply:
         category = await router.classify(self.llm, text, self._now_text())
+        if category == "chat":
+            category = await self._rescue(text) or category
         log.info("route %r -> %s", text[:60], category)
         if category == "chat":
             reply = Reply(await self._chat(chat_id, text))
@@ -51,6 +53,17 @@ class Agent:
         await self.store.add_message(chat_id, "user", text)
         await self.store.add_message(chat_id, "assistant", reply.text)
         return reply
+
+    async def _rescue(self, text: str) -> str | None:
+        """A category code is sure about, for a message the router called chat."""
+        for rescue in self.registry.rescues:
+            try:
+                if category := await rescue(text, self.ctx):
+                    log.info("router said chat for %r; rescued to %s", text[:60], category)
+                    return category
+            except Exception:
+                log.exception("rescue check failed for %r", text[:60])
+        return None
 
     async def _chat(self, chat_id: int, text: str) -> str:
         history = await self.store.history(chat_id, self.history_turns)
@@ -66,14 +79,20 @@ class Agent:
         args = clean_args(tool, call.function.arguments) if tool else {}
         return tool, args, msg, messages
 
-    async def _use_tools(self, chat_id: int, category: str, text: str) -> Reply:
+    async def _use_tools(self, chat_id: int, category: str, text: str, rescued: bool = False) -> Reply:
         # Only the last exchange as context: enough for "move it to 5pm", small enough for a 2B model.
         history = await self.store.history(chat_id, 2)
         tool, args, msg, messages = await self.choose_tool(category, text, history)
         if tool is None and category in self.registry.fallbacks:
-            name, args = self.registry.fallbacks[category](text)
-            tool = self.registry.get(name)
-            log.info("no tool call for %r; fallback %s(%s)", text[:60], name, args)
+            if guess := self.registry.fallbacks[category](text):
+                name, args = guess
+                tool = self.registry.get(name)
+                log.info("no tool call for %r; fallback %s(%s)", text[:60], name, args)
+        if tool is None and not rescued:
+            # Wrong category ("dah siap X" routed to schedule): same second opinion as for chat.
+            other = await self._rescue(text)
+            if other and other != category and other in self.registry:
+                return await self._use_tools(chat_id, other, text, rescued=True)
         if tool is None:
             log.info("no usable tool call for %r; answering as chat", text[:60])
             return Reply(await self._chat(chat_id, text))

@@ -23,7 +23,11 @@ NOT_SET_UP = ("Notion isn't set up. Put NOTION_TOKEN and NOTION_TASKS_DB in .env
               "(see .env.example) and share the database with the integration.")
 DONE_WORDS = ("done", "complete", "completed", "finished", "selesai")
 MAX_PAGES = 10  # 1,000 open tasks is plenty for a personal list
-TASK_WORDS = FILLER | {"task", "tasks", "todo", "to-do", "mark", "as", "done", "complete", "finished", "tugas"}
+TASK_WORDS = FILLER | {"task", "tasks", "todo", "to-do", "mark", "as", "done", "complete", "completed", "finished",
+                       "finish", "tugas", "i", "i've", "ive", "just", "already", "with", "have", "saya", "aku",
+                       "dah", "sudah", "siap", "selesai"}
+# "I finished the invoice", "dah siap invoice tu": a task marked done, said casually.
+DONE = re.compile(r"\b(finish|finished|complete|completed|done|selesai|siap)\b", re.I)
 
 
 def database_id(text: str) -> str:
@@ -231,6 +235,35 @@ def task_words(phrase: str) -> list[str]:
     return [w for w in re.findall(r"[\w-]+", (phrase or "").lower()) if w not in TASK_WORDS]
 
 
+def best_tasks(tasks: list[Task], words: list[str]) -> list[Task]:
+    """The open tasks whose titles match the words best, if any match well enough."""
+    scored = [(match_score(t.title, words), t) for t in tasks]
+    best = max((sc for sc, _ in scored), default=0)
+    return [t for sc, t in scored if sc >= MATCH_THRESHOLD and sc == best]
+
+
+def guess(text: str) -> tuple[str, dict] | None:
+    """No tool call from the model for a task message: 'I finished X' means complete_task.
+    Anything else is left to the model (None)."""
+    return ("complete_task", {"task": text}) if DONE.search(text) else None
+
+
+def rescue(notion: Notion | None):
+    """For a message the router sent to chat: 'I finished the passport renewal' is a task
+    completion only if an open task really matches, so 'I finished my workout, any tips?'
+    stays a chat."""
+    async def check(text: str, ctx: Context) -> str | None:
+        if notion is None or not DONE.search(text) or not (words := task_words(text)):
+            return None
+        try:
+            tasks = await notion.open_tasks(ctx.now().tzinfo)
+        except httpx.HTTPError as e:
+            log.warning("notion unreachable while checking %r: %r", text[:60], e)
+            return None
+        return "notion" if best_tasks(tasks, words) else None
+    return check
+
+
 def tools(ctx: Context, notion: Notion | None = None) -> list[Tool]:
     s = ctx.settings
     notion = notion or (Notion(s.notion_token, s.notion_tasks_db) if s.notion_token and s.notion_tasks_db else None)
@@ -274,10 +307,7 @@ def tools(ctx: Context, notion: Notion | None = None) -> list[Tool]:
         words = task_words(args.get("task") or "")
         if not words:
             return Result("Which task did you finish?")
-        tasks = await notion.open_tasks(ctx.now().tzinfo)
-        scored = [(match_score(t.title, words), t) for t in tasks]
-        best = max((sc for sc, _ in scored), default=0)
-        matches = [t for sc, t in scored if sc >= MATCH_THRESHOLD and sc == best]
+        matches = best_tasks(await notion.open_tasks(ctx.now().tzinfo), words)
         if not matches:
             return Result(f"I can't find an open task matching “{' '.join(words)}”.")
         if len(matches) > 1:

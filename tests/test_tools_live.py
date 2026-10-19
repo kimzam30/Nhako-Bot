@@ -128,3 +128,30 @@ async def test_chat_uses_a_fact(agent):
     reply = await with_facts._chat(1, "what's my sister's name?")
     await store.close()
     assert "Aina" in reply, reply
+
+
+@pytest.mark.parametrize("text, completes", [
+    ("I finished the passport renewal", True),
+    ("dah siap renew passport", True),
+    ("I finished my workout, any stretching tips?", False),  # must stay a chat
+])
+async def test_task_completion_end_to_end(agent, text, completes):
+    """The whole path (router, rescue, tool choice, fallback) with the real model and a fake
+    Notion. The tests above measure the model alone; this is what the user actually gets."""
+    import dataclasses
+
+    import httpx
+
+    from nhako.store import Store
+    from nhako.tools.notion import Notion
+
+    from .test_notion import DB, FakeNotion
+    store = await Store(":memory:").open()
+    ctx = dataclasses.replace(agent.ctx, store=store)
+    notion = Notion("secret", DB, transport=httpx.MockTransport(FakeNotion()))
+    full = Agent(agent.llm, store, default_registry(ctx, notion=notion), ctx)
+    reply = await full.handle(1, text)
+    await store.close()
+    assert bool(reply.confirm_id) == completes, reply.text
+    if completes:
+        assert "Renew passport" in reply.text

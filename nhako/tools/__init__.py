@@ -69,12 +69,18 @@ class Registry:
     by_category: dict[str, list[Tool]] = field(default_factory=dict)
     # category -> fn(text) -> (tool name, args): used when the model makes no tool call,
     # for categories where answering from the model alone would mean making things up.
-    fallbacks: dict[str, Callable[[str], tuple[str, dict]]] = field(default_factory=dict)
+    # None from a fallback: no safe guess, answer as chat.
+    fallbacks: dict[str, Callable[[str], tuple[str, dict] | None]] = field(default_factory=dict)
+    # fn(text, ctx) -> category or None: a second opinion when the router says "chat", for
+    # messages code can recognise with certainty (e.g. "I finished X" where X is an open task).
+    rescues: list[Callable[[str, Context], Awaitable[str | None]]] = field(default_factory=list)
 
-    def add(self, category: str, tools: list[Tool], fallback=None) -> None:
+    def add(self, category: str, tools: list[Tool], fallback=None, rescue=None) -> None:
         self.by_category.setdefault(category, []).extend(tools)
         if fallback:
             self.fallbacks[category] = fallback
+        if rescue:
+            self.rescues.append(rescue)
 
     def schemas(self, category: str) -> list[dict]:
         return [t.schema() for t in self.by_category.get(category, [])]
@@ -94,7 +100,8 @@ def default_registry(ctx: Context, cal=None, docker=None, notion=None, postiz=No
     reg.add("schedule", calendar.tools(ctx, cal) + reminders.tools(ctx))
     reg.add("web", web.tools(ctx))
     reg.add("homelab", homelab.tools(ctx, docker), fallback=homelab.guess)
-    reg.add("notion", notion_tools.tools(ctx, notion))
+    reg.add("notion", notion_tools.tools(ctx, notion), fallback=notion_tools.guess,
+            rescue=notion_tools.rescue(notion))
     reg.add("postiz", postiz_tools.tools(ctx, postiz))
     reg.add("memory", memory.tools(ctx))
     return reg

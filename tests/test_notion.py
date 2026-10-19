@@ -1,4 +1,5 @@
 """Notion tasks against a fake API shaped like the real "My Tasks" template database."""
+import dataclasses
 import json
 
 import httpx
@@ -198,3 +199,51 @@ async def test_open_tasks_follow_pagination(api):
         return api(req)
     client = Notion("secret", DB, transport=httpx.MockTransport(paged))
     assert [t.id for t in await client.open_tasks(NOW.tzinfo)] == ["p1", "p2", "p3", "p4", "p5"]
+
+
+# --- "I finished X" when the model doesn't help ---
+
+def test_guess_only_for_completions():
+    assert notion.guess("I finished the passport renewal") == ("complete_task", {"task": "I finished the passport renewal"})
+    assert notion.guess("dah siap invoice tu") is not None
+    assert notion.guess("what's due this week?") is None
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("I finished the passport renewal", "notion"),          # an open task matches
+    ("I finished my workout, any stretching tips?", None),  # nothing matches: stays chat
+    ("tell me a joke", None),                               # not a completion at all
+])
+async def test_rescue_needs_a_matching_open_task(api, ctx, text, expected):
+    client = Notion("secret", DB, transport=httpx.MockTransport(api))
+    assert await notion.rescue(client)(text, ctx) == expected
+
+
+async def test_rescue_without_notion_does_nothing(ctx):
+    assert await notion.rescue(None)("I finished the passport renewal", ctx) is None
+
+
+async def test_router_says_chat_and_model_makes_no_call_still_asks_to_complete(api, ctx, store):
+    """The worst case seen live: the router picks chat and the model makes no tool call."""
+    from nhako.agent import Agent
+    from nhako.tools import default_registry
+
+    from .conftest import FakeLLM
+    client = Notion("secret", DB, transport=httpx.MockTransport(api))
+    ctx = dataclasses.replace(ctx, store=store)
+    agent = Agent(FakeLLM("chat", tool=None), store, default_registry(ctx, notion=client), ctx)
+    reply = await agent.handle(1, "I finished the passport renewal")
+    assert reply.confirm_id and "Renew passport" in reply.text
+
+
+async def test_wrong_category_with_no_tool_call_is_rescued(api, ctx, store):
+    """Seen live: 'dah siap renew passport' routed to schedule, then no tool call."""
+    from nhako.agent import Agent
+    from nhako.tools import default_registry
+
+    from .conftest import FakeLLM
+    client = Notion("secret", DB, transport=httpx.MockTransport(api))
+    ctx = dataclasses.replace(ctx, store=store)
+    agent = Agent(FakeLLM("schedule", tool=None), store, default_registry(ctx, notion=client), ctx)
+    reply = await agent.handle(1, "dah siap renew passport")
+    assert reply.confirm_id and "Renew passport" in reply.text
