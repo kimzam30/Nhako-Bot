@@ -34,6 +34,13 @@ class Job:
     weekday: int | None = None
 
 
+@dataclass
+class Watcher:
+    """Polled every `every_ticks` ticks; each line `check(now)` returns goes to the alert chat."""
+    every_ticks: int
+    check: Callable[[dt.datetime], Awaitable[list[str]]]
+
+
 async def run_job(job: Job, store: Store, send: Send, chat_id: int, now: dt.datetime) -> None:
     if job.weekday is not None and now.weekday() != job.weekday:
         return
@@ -98,8 +105,20 @@ async def watch(monitor, send: Send, chat_id: int) -> None:
         await send(chat_id, "🏠 Homelab:\n" + "\n".join(alerts))
 
 
+async def poll(watchers: Sequence[Watcher], send: Send, chat_id: int, now: dt.datetime, ticks: int) -> None:
+    for w in watchers:
+        if ticks % w.every_ticks:
+            continue
+        try:
+            if alerts := await w.check(now):
+                await send(chat_id, "\n".join(alerts))
+        except Exception as e:  # the service being down is not worth a traceback every few minutes
+            log.warning("watcher %s failed: %r", getattr(w.check, "__qualname__", w.check), e)
+
+
 async def run(store: Store, send: Send, now: Callable[[], dt.datetime], *, monitor=None,
-              alert_chat: int = 0, heartbeat: Path | None = None, **kwargs) -> None:
+              alert_chat: int = 0, heartbeat: Path | None = None, watchers: Sequence[Watcher] = (),
+              **kwargs) -> None:
     ticks = 0
     while True:
         try:
@@ -111,6 +130,7 @@ async def run(store: Store, send: Send, now: Callable[[], dt.datetime], *, monit
                 await watch(monitor, send, alert_chat)
             except Exception:
                 log.exception("homelab check failed")
+        await poll(watchers, send, alert_chat, now(), ticks)
         if heartbeat is not None:  # the Docker healthcheck looks at this file's age
             try:
                 heartbeat.touch()

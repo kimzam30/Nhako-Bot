@@ -18,7 +18,8 @@ CATEGORIES = {
     "homelab": "LIVE STATUS checks of the user's own servers: is the Minecraft server 'getgud' up, "
                "who is online, are their Docker containers (nextcloud, postiz, vaultwarden...) healthy",
     "postiz": "the user's social media (Postiz): what posts are scheduled or published, "
-              "write/draft a post, tweet, LinkedIn or Instagram caption "
+              "stats of their posts or accounts (views, likes, followers), "
+              "write/draft a post, tweet, LinkedIn, Instagram or TikTok caption "
               "(whether the Postiz app itself is up or running is homelab)",
     "notion": "the user's to-do / task list and projects in Notion: add a task, what's due, what's left to do, "
               "mark a task done or in progress, remove a task, project progress",
@@ -47,6 +48,7 @@ EXAMPLES = [
     ("set the website project to 70%", "notion"),
     ("anything going out on social media tomorrow?", "postiz"),
     ("write a tweet about the server wipe", "postiz"),
+    ("how many views did my tiktok get this week?", "postiz"),
     ("remember that I'm allergic to prawns", "memory"),
     ("don't forget to remind me at 5 to call mum", "schedule"),
     ("what do you know about me?", "memory"),

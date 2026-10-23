@@ -7,14 +7,16 @@ services:
     build: .
     image: nhako:local
     container_name: nhako
+    extra_hosts: ["host.docker.internal:host-gateway"]   # Linux: Docker Desktop provided this name
     restart: unless-stopped
     env_file: .env
     environment:
       OLLAMA_HOST: http://host.docker.internal:11434
       DOCKER_PROXY_URL: http://nhako-docker-proxy:2375
-      # Published ports on the Windows host. kimzamwrld binds 127.0.0.1 only, which
-      # host.docker.internal still reaches (same as Ollama).
-      MC_SERVERS: getgud=host.docker.internal:25565,kimzamwrld=host.docker.internal:25566
+      # Published ports on the host. getgud is on 0.0.0.0, so host.docker.internal
+      # (host-gateway) reaches it. kimzamwrld publishes only on 127.0.0.1 and the
+      # Tailscale IP, and the gateway cannot reach 127.0.0.1 on Linux, so use that IP.
+      MC_SERVERS: getgud=host.docker.internal:25565,kimzamwrld=100.66.219.92:25566
       HF_HOME: /app/data/huggingface   # the root filesystem is read-only
     volumes:
       - ./data:/app/data   # nhako.db, token.json, credentials.json, whisper model cache
@@ -50,7 +52,7 @@ services:
       - -shutdowngracetime=5
       - -allowGET=^(/v[0-9.]+)?/containers/(json|[0-9a-f]{12,64}/stats)$$
     # Not root: Docker Desktop's socket is root:root 660, so the group is enough.
-    user: "65534:0"
+    user: "65534:985"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

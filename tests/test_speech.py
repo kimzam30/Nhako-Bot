@@ -17,6 +17,12 @@ def test_telegram_voice_note_decodes():
     assert 3.0 < len(samples) / 16000 < 6.0
 
 
+def test_language_is_english_unless_auto():
+    assert Transcriber("base").language == "en"
+    assert Transcriber("base", language=" MS ").language == "ms"
+    assert Transcriber("base", language="auto").language is None
+
+
 @pytest.mark.live
 async def test_transcribe_voice_note():
     """Downloads whisper base (~145 MB) on first run. Not data/whisper: that cache belongs to

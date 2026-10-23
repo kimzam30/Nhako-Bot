@@ -84,7 +84,7 @@ def tools(ctx: Context, notion: Notion | None = None) -> list[Tool]:
 
     async def one_project(p: Project, ctx: Context) -> Result:
         tasks = [t for t in await notion.open_tasks(ctx.now().tzinfo) if p.id in t.projects]
-        left = "\n".join(t.line(ctx.now()) for t in tasks) if tasks else "No open tasks in it."
+        left = "\n".join(t.line(ctx.now(), show_project=False) for t in tasks) if tasks else "No open tasks in it."
         return Result(f"🗺️ {p.line()[2:]}\n\n{left}", footer=f"🔗 {p.url}" if p.url else "")
 
     async def list_projects(args: dict, ctx: Context) -> Result:

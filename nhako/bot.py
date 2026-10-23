@@ -31,11 +31,12 @@ from .tools import default_registry
 from .tools.calendar import GoogleCalendar, agenda
 from .tools.homelab import Docker, docker_report, mc_report, parse_servers
 from .tools.notion import Notion, morning_tasks, overdue_nudge, projects_report, stats_text, tasks_report, weekly_review
-from .tools.postiz import Postiz
+from .tools.postiz import Postiz, TikTokWatch, weekly_digest
 
 log = logging.getLogger(__name__)
 
 TELEGRAM_LIMIT = 4096
+TIKTOK_EVERY_TICKS = 15  # Postiz polled for TikTok inbox uploads every ~5 minutes
 
 HELP = """I'm Nhako, running locally on {model}.
 
@@ -52,6 +53,7 @@ Just talk to me (text or voice):
 • "what's in the Nhako Depot page?"
 • "remember that I prefer meetings after 10am" / "what do you know about me?"
 • "what's going out on social media this week?" / "draft a tweet about the server wipe" (saved as a draft)
+• "how did my tiktoks do this week?" / "how many followers did I gain this month?"
 
 /today [tomorrow, this week, ...] lists your calendar instantly
 /reminders shows reminders you can cancel
@@ -176,7 +178,7 @@ def build_app(settings: Settings) -> Application:
     help_text = HELP.format(model=settings.ollama_model, agenda_line=(
         f"\nEvery morning at {agenda_time:%H:%M} I send you the day's agenda." if agenda_time else ""))
     background: list[asyncio.Task] = []
-    ears = Transcriber(settings.whisper_model, str(settings.data_dir / "whisper"))
+    ears = Transcriber(settings.whisper_model, str(settings.data_dir / "whisper"), settings.whisper_language)
     me = filters.User(user_id=settings.allowed_user_id)
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -240,6 +242,12 @@ def build_app(settings: Settings) -> Application:
                                   weekday=review[0]))
     if notion is not None and (nudge := settings.overdue_nudge_at):
         jobs.append(scheduler.Job("nudge_sent", nudge, lambda: overdue_nudge(notion, ctx.now(), store)))
+    if postiz is not None and (review := settings.weekly_review_at):
+        jobs.append(scheduler.Job("postiz_digest_sent", review[1], lambda: weekly_digest(postiz, ctx.now()),
+                                  weekday=review[0]))
+    watchers: list[scheduler.Watcher] = []
+    if postiz is not None and settings.postiz_tiktok_reminders:
+        watchers.append(scheduler.Watcher(TIKTOK_EVERY_TICKS, TikTokWatch(postiz, store).check))
 
     async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, await agenda(cal, ctx, " ".join(context.args) or "today"))
@@ -303,7 +311,7 @@ def build_app(settings: Settings) -> Application:
                     text = await ears.transcribe(buf)
                 except Exception:
                     log.exception("voice transcription failed")
-                    return await send(update, "⚠️ I couldn't process that voice note. Details are in the log.")
+                    return await send(update, "⚠️ I couldn't open that voice note. Try again?")
                 if not text:
                     return await send(update, "🎙️ I couldn't make out any words in that voice note.")
                 await send(update, f"🎙️ “{text}”")
@@ -313,10 +321,10 @@ def build_app(settings: Settings) -> Application:
                 reply = await agent.handle(update.effective_chat.id, text)
             except httpx.TimeoutException:
                 log.warning("model timed out after %ss on %r", settings.ollama_timeout, text[:80])
-                return await send(update, "⌛ My local brain took too long to answer. Try again, or /ping.")
+                return await send(update, "⌛ That took too long. Try again?")
             except Exception:
                 log.exception("handling %r failed", text[:80])
-                return await send(update, "⚠️ My local brain didn't answer. Is Ollama running? Try /ping.")
+                return await send(update, "⚠️ I couldn't think just now. Try again, or /ping.")
         await send(update, reply.text, confirm_buttons(reply.confirm_id) if reply.confirm_id else None)
 
     async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -339,7 +347,7 @@ def build_app(settings: Settings) -> Application:
         log.error("unhandled error", exc_info=context.error)
         if isinstance(update, Update) and update.effective_chat:
             with contextlib.suppress(Exception):
-                await send(update, "⚠️ Something broke while handling that. Details are in the log.")
+                await send(update, "⚠️ Something went wrong. Try again in a bit.")
 
     async def post_init(app: Application):
         await store.open()
@@ -353,7 +361,7 @@ def build_app(settings: Settings) -> Application:
             store, lambda chat_id, text: send_to(app.bot, chat_id, text), ctx.now,
             agenda_time=agenda_time, agenda_chat=settings.allowed_user_id, agenda=morning,
             warm=llm.warm, history_keep=settings.history_keep, heartbeat=settings.data_dir / "heartbeat",
-            monitor=monitor, alert_chat=settings.allowed_user_id, jobs=jobs)))
+            monitor=monitor, alert_chat=settings.allowed_user_id, jobs=jobs, watchers=watchers)))
 
     async def post_shutdown(app: Application):
         for task in background:

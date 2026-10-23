@@ -1,5 +1,5 @@
 """Agent flow with a fake model: routing, tool dispatch, confirm buttons, fallbacks."""
-from nhako.agent import clean_args
+from nhako.agent import STYLE, clean_args
 from nhako.bot import split_message, to_html
 from nhako.router import CATEGORIES, parse_category, router_prompt
 
@@ -13,6 +13,16 @@ async def test_chat_goes_straight_to_the_model(make_agent, registry):
     reply = await agent.handle(CHAT, "hi")
     assert reply.text == "hello there" and reply.confirm_id is None
     assert registry.ran == []
+
+
+async def test_style_is_for_replies_not_tool_choice(make_agent):
+    llm = FakeLLM("chat")
+    await make_agent(llm).handle(CHAT, "hi")
+    assert STYLE in llm.calls[1]["messages"][0]["content"]
+    llm = FakeLLM("schedule", tool="list_events", args={"range": "today"})
+    await make_agent(llm).handle(CHAT, "what do I have today")
+    assert STYLE not in llm.calls[1]["messages"][0]["content"]  # choosing the tool
+    assert STYLE in llm.calls[2]["messages"][0]["content"]  # writing the answer from its result
 
 
 async def test_chat_reply_and_question_are_saved(make_agent, store):

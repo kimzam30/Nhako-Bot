@@ -58,6 +58,10 @@ CASES += [
      "tool": "draft_post", "args": {"channel": ["linkedin"], "content": ["dashboard"]}},
     {"id": "p5-posts-tmr", "category": "postiz", "text": "anything going out on social media tomorrow?",
      "tool": "list_posts", "args": {"when": ["tomorrow"]}},
+    {"id": "pz-post-stats", "category": "postiz", "text": "how did my tiktoks do last week?",
+     "tool": "post_stats", "args": {"channel": ["tiktok"]}},
+    {"id": "pz-channel-stats", "category": "postiz", "text": "how many followers did I gain on x this month?",
+     "tool": "channel_stats", "args": {"channel": ["x"]}},
 ]
 
 # Hakim's Hub: moving, removing, and project progress.

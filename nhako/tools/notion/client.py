@@ -40,6 +40,8 @@ class Notion:
         self._schema: TaskSchema | None = None
         self._projects: ProjectSchema | None = None
         self._loaded_at = 0.0
+        self._titles: dict[str, str] | None = None  # project id -> name, for the project on each task line
+        self._titles_at = 0.0
         self._owner: str | None | bool = False  # False: not looked up yet
 
     async def aclose(self) -> None:
@@ -109,7 +111,16 @@ class Notion:
             body["filter"] = filter_
         if schema.due:
             body["sorts"] = [{"property": schema.due, "direction": "ascending"}]
-        return [parse_page(p, schema, tz) for p in await self._query_all(source, body)]
+        tasks = [parse_page(p, schema, tz) for p in await self._query_all(source, body)]
+        if any(t.projects for t in tasks):
+            try:
+                titles = await self.project_titles()
+            except httpx.HTTPError as e:  # the names are a nicety: still list the tasks
+                log.warning("couldn't read project names: %r", e)
+                titles = {}
+            for t in tasks:
+                t.project_names = [titles[i] for i in t.projects if i in titles]
+        return tasks
 
     async def open_tasks(self, tz) -> list[Task]:
         _, schema = await self.schema()
@@ -180,7 +191,15 @@ class Notion:
         if found is None:
             return []
         source, schema = found
-        return [parse_project(p, schema) for p in await self._query_all(source, {"page_size": 100})]
+        projects = [parse_project(p, schema) for p in await self._query_all(source, {"page_size": 100})]
+        self._titles, self._titles_at = {p.id: p.title for p in projects}, self.clock()
+        return projects
+
+    async def project_titles(self) -> dict[str, str]:
+        """Project id -> name, cached like the schema."""
+        if self._titles is None or self.clock() - self._titles_at > SCHEMA_TTL:
+            await self.projects()
+        return self._titles or {}
 
     async def add_project(self, title: str, status: str | None, about: str = "") -> dict:
         found = await self.project_schema()
@@ -192,6 +211,7 @@ class Notion:
             props.update(schema.status.value(status))
         if about and schema.about:
             props[schema.about] = {"rich_text": [{"text": {"content": about}}]}
+        self._titles = None  # a new name to show next time
         return await self._req("POST", "/pages", {"parent": {"type": "data_source_id", "data_source_id": source},
                                                   "properties": props})
 

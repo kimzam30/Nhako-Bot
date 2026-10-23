@@ -228,19 +228,22 @@ class Task:
     done: bool = False
     xp: float = 0
     cleared_on: dt.datetime | None = None  # the "Cleared on" date, else when the page was last edited
+    project_names: list[str] = field(default_factory=list)  # filled in by the client
 
     def overdue(self, now: dt.datetime) -> bool:
         if self.due is None or self.done:
             return False
         return self.due < now if self.has_time else self.due.date() < now.date()
 
-    def line(self, now: dt.datetime) -> str:
+    def line(self, now: dt.datetime, show_project: bool = True) -> str:
         text = f"• {self.title}"
         if self.due is not None:
             fmt = "%a %d %b %H:%M" if self.has_time else "%a %d %b"
             text += f"  ({'⚠️ overdue, ' if self.overdue(now) else ''}due {self.due:{fmt}})"
         if self.in_progress or self.done:
             text += f"  · {self.status}"
+        if show_project and self.project_names:
+            text += f"  · 🗺️ {', '.join(self.project_names)}"
         if self.note:
             text += f"\n   ↳ {self.note}"
         return text

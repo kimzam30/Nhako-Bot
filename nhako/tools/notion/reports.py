@@ -121,7 +121,7 @@ async def stats_text(notion, now: dt.datetime, when: str = "") -> str:
         for pid in t.projects:
             by_project[pid] = by_project.get(pid, 0) + t.xp
     if by_project and max(by_project.values()) > 0:
-        names = {p.id: p.title for p in await notion.projects()}
+        names = await notion.project_titles()
         pid = max(by_project, key=by_project.get)
         if pid in names:
             lines.append(f"🗺️ Most XP {label}: {names[pid]} ({by_project[pid]:g} XP)")

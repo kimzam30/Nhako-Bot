@@ -30,6 +30,8 @@ A private Telegram assistant that runs entirely on your own hardware. A small lo
 | 🗺️ **Notion projects** | "how far along are my projects?", "what's left in Octomations?", "set Nhako Beam progress to 50%", "pause NeraOS", "start a new project called Nhako Radio" | Needs a relation from the tasks database to a projects database |
 | 🏆 **XP & pages** | "how much XP this week?", "what's my level?", "what's in my Nhako Depot page?" | XP comes from the database's own XP formula; pages are only those shared with the integration |
 | 📣 **Postiz** | "what's going out on social media this week?", "draft a tweet about the server wipe" | Saved as a **draft** after you confirm. The bot never publishes |
+| 📊 **Social stats** | "how did my posts do this week?", "how's my tiktok growing this month?" | Likes, comments and views per post (newest 5), and followers and views per channel. A digest arrives with the weekly review |
+| 📲 **TikTok inbox** | — | When Postiz sends a TikTok post to the TikTok app's inbox, a reminder to post it there before TikTok drops it 24 h later (`POSTIZ_TIKTOK_REMINDERS`) |
 | 🧠 **Memory** | "remember that I'm allergic to prawns", "what do you know about me?" | Only saved when you ask. Passwords, PINs, keys and IC/card numbers are refused |
 | 🚨 **Alerts** | — | A message when a container crashes or turns unhealthy, a Minecraft server stops answering or Ollama goes down, and again when it recovers |
 | 🎙️ **Voice notes** | any of the above, spoken | Transcribed offline with faster-whisper on the CPU |
@@ -186,8 +188,10 @@ All settings come from `.env` (see [.env.example](.env.example)). Inside Docker,
 | `ALERT_IGNORE` | *(empty)* | Container names never to alert about |
 | `NOTION_TOKEN`, `NOTION_TASKS_DB` | *(empty)* | Notion integration secret and tasks database |
 | `POSTIZ_URL`, `POSTIZ_API_KEY` | *(empty)* | Postiz backend URL and public API key |
+| `POSTIZ_TIKTOK_REMINDERS` | `true` | Ping when a TikTok upload is waiting in the TikTok app's inbox |
 | `GOOGLE_CREDENTIALS_FILE`, `GOOGLE_TOKEN_FILE` | `credentials.json`, `token.json` | File names inside `DATA_DIR` |
 | `WHISPER_MODEL` | `base` | `tiny`, `base` or `small` |
+| `WHISPER_LANGUAGE` | `en` | Language of your voice notes, or `auto` to let whisper guess |
 | `HISTORY_TURNS` | `6` | Recent messages given to the model as context |
 | `HISTORY_KEEP` | `200` | Messages kept per chat; older ones are deleted daily |
 | `DATA_DIR` | `data` | Database, Google token and whisper cache |

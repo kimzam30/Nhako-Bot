@@ -53,6 +53,8 @@ async def test_safety_critical_routes(routed, case_id):
     ("write a linkedin post about my new homelab dashboard", "postiz"),
     ("anything going out on social media tomorrow?", "postiz"),
     ("is postiz running?", "homelab"),                          # the container, not the posts
+    ("how did my tiktoks do last week?", "postiz"),
+    ("how many followers did I gain on x this month?", "postiz"),
     ("remember that my car is a Myvi", "memory"),
     ("remind me to service my car on saturday", "schedule"),    # remind, not remember
     ("forget what I told you about prawns", "memory"),

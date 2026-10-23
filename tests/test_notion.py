@@ -403,7 +403,9 @@ def test_status_words_map_to_options(words, option):
 async def test_hub_list_shows_in_progress_and_notes(hub_tools, ctx):
     text = (await hub_tools["list_tasks"].run({}, ctx)).text
     assert "• Review Gacha Contract  (⚠️ overdue, due Sat 17 Oct)  · ⚔️ In progress" in text
-    assert "• Octomations Bug Fixes  (due Sat 31 Oct)\n   ↳ Planning" in text
+    assert "• Octomations Bug Fixes  (due Sat 31 Oct)  · 🗺️ Octomations\n   ↳ Planning" in text
+    assert "• File Thumbnail  (due Sat 31 Oct)  · 🗺️ Nhako Beam" in text
+    assert "• Review Gacha Contract  (⚠️ overdue, due Sat 17 Oct)  · ⚔️ In progress\n" in text  # no project
     only = (await hub_tools["list_tasks"].run({"when": "in progress"}, ctx)).text
     assert only.startswith("📝 1 task in progress:") and "Gacha" in only
 
@@ -467,6 +469,32 @@ async def test_one_project_shows_its_open_tasks(hub_tools, ctx):
     out = await hub_tools["list_projects"].run({"project": "octomations"}, ctx)
     assert out.text.startswith("🗺️ Octomations  ⚔️ ▱▱▱▱▱ 0%")
     assert "Octomations Landing Page" in out.text and "Bug Fixes" in out.text and "Thumbnail" not in out.text
+    assert "🗺️" not in out.text.split("\n\n", 1)[1]  # the heading already names the project
+
+
+async def test_project_names_are_read_once_per_ttl(hub):
+    clock = [0.0]
+    client = Notion("secret", HUB_DB, transport=httpx.MockTransport(hub), clock=lambda: clock[0])
+
+    def reads():
+        return len([r for r in hub.requests if r[1] == f"/v1/data_sources/{CAMPAIGNS}/query"])
+    await client.open_tasks(NOW.tzinfo)
+    await client.open_tasks(NOW.tzinfo)
+    assert reads() == 1
+    clock[0] = 601
+    await client.open_tasks(NOW.tzinfo)
+    assert reads() == 2
+
+
+async def test_tasks_still_list_when_project_names_fail():
+    class NoCampaigns(FakeHub):
+        def __call__(self, req):
+            if req.url.path == f"/v1/data_sources/{CAMPAIGNS}/query":
+                return httpx.Response(500)
+            return super().__call__(req)
+    client = Notion("secret", HUB_DB, transport=httpx.MockTransport(NoCampaigns()))
+    text = await notion.tasks_report(client, NOW)
+    assert text.startswith("📝 4 tasks open:") and "🗺️" not in text
 
 
 async def test_project_named_in_the_message_when_the_model_leaves_it_out(hub_tools, ctx):

@@ -12,6 +12,11 @@ from .tools.memory import facts_prompt
 
 log = logging.getLogger(__name__)
 
+# Only for text the user reads (chat, summaries), never for tool choice: that prompt is tuned.
+STYLE = ("Write like a friend texting: 1-3 short sentences, everyday words, no jargon, no headings, "
+         "no lists unless asked. If you don't know, say so in one line. "
+         "Malay means Malaysian Malay, never Indonesian.")
+
 
 @dataclass
 class Reply:
@@ -27,16 +32,19 @@ class Agent:
     def _now_text(self) -> str:
         return self.ctx.now().strftime("%A, %d %B %Y, %I:%M %p")
 
-    async def _system(self, chat_id: int | None = None) -> dict:
+    async def _system(self, chat_id: int | None = None, style: bool = False) -> dict:
         """With chat_id: the user's saved facts too. Chat only: in Phase 6 tests even one related fact
         ("prefers meetings after 10am") made the 2B model list events instead of moving one.
-        The wording is tuned: moving the clock to the end cost two live routing/tool tests."""
+        The wording is tuned: moving the clock to the end cost two live routing/tool tests.
+        With style: how to sound (short, plain), for replies the user reads, not for tool choice."""
         content = ("You are Nhako, a friendly personal assistant made by Hakim (kimzam). The user is in "
                    f"Malaysia (GMT+8). It is now {self._now_text()}. Reply in the user's language "
                    "(English or Malay), briefly and plainly. Never invent calendar events or facts.")
         if self.store is not None and chat_id is not None:
             if known := facts_prompt(await self.store.facts(chat_id)):
                 content += "\n\n" + known
+        if style:
+            content += "\n\n" + STYLE
         return {"role": "system", "content": content}
 
     async def handle(self, chat_id: int, text: str) -> Reply:
@@ -78,7 +86,8 @@ class Agent:
 
     async def _chat(self, chat_id: int, text: str) -> str:
         history = await self.store.history(chat_id, self.history_turns)
-        msg = await self.llm.chat([await self._system(chat_id), *history, {"role": "user", "content": text}])
+        system = await self._system(chat_id, style=True)
+        msg = await self.llm.chat([system, *history, {"role": "user", "content": text}])
         return msg.content.strip() or "🤔"
 
     async def choose_tool(self, category: str, text: str, history: list[dict] = ()):
@@ -112,14 +121,14 @@ class Agent:
             result = await tool.run(args, dataclasses.replace(self.ctx, chat_id=chat_id, text=text))
         except Exception:
             log.exception("tool %s failed", tool.name)
-            return Reply(f"⚠️ Something went wrong while running {tool.name}. Details are in the log.")
+            return Reply("⚠️ Something went wrong. Try again in a bit.")
 
         if isinstance(result, NeedsConfirm):
             action_id = await self.store.save_pending(chat_id, tool.name, result.args)
             return Reply(result.prompt, confirm_id=action_id)
         text = result.text
         if result.summarize:
-            final = await self.llm.chat([*messages, msg,
+            final = await self.llm.chat([await self._system(style=True), *messages[1:], msg,
                                          {"role": "tool", "tool_name": tool.name, "content": result.text}])
             text = final.content.strip() or result.text
         return Reply(f"{text}\n\n{result.footer}" if result.footer else text)
@@ -138,7 +147,7 @@ class Agent:
             result = await tool.execute(args, dataclasses.replace(self.ctx, chat_id=chat_id))
         except Exception:
             log.exception("confirmed %s failed", name)
-            return f"⚠️ {name} failed. Details are in the log."
+            return "⚠️ That didn't work. Try again in a bit."
         await self.store.add_message(chat_id, "assistant", result.text)
         return result.text
 

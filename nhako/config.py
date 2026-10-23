@@ -67,8 +67,10 @@ class Settings(BaseSettings):
     notion_tasks_db: str = ""           # tasks database id or URL, shared with the integration
     postiz_url: str = ""                # backend URL, e.g. https://postiz.example.com/api
     postiz_api_key: str = ""            # Postiz → Settings → Public API
+    postiz_tiktok_reminders: bool = True  # ping when a TikTok upload lands in the TikTok app's inbox
 
     whisper_model: str = "base"
+    whisper_language: str = "en"  # "auto": whisper guesses, and took accented English for Malay
     history_turns: int = 6       # user+assistant messages kept as short-term context for chat
     history_keep: int = 200      # messages kept per chat in the database; older ones are pruned daily
 

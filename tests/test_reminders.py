@@ -214,3 +214,21 @@ def test_parse_weekly():
 def test_bad_job_times_are_clear_config_errors(field, bad, name):
     with pytest.raises(ValidationError, match=name):
         Settings(_env_file=None, **{field: bad})
+
+
+# --- watchers (Postiz TikTok inbox) ---
+
+async def test_watcher_runs_on_its_cadence_and_survives_failures():
+    out, calls = Outbox(), []
+
+    async def check(now):
+        calls.append(now)
+        if len(calls) == 2:
+            raise RuntimeError("postiz down")
+        return ["📲 one", "📲 two"]
+
+    w = [scheduler.Watcher(3, check)]
+    for ticks in range(7):
+        await scheduler.poll(w, out, CHAT, at(19, 8), ticks)
+    assert len(calls) == 3  # ticks 0, 3, 6; the failure on tick 3 only logs
+    assert out.sent == [(CHAT, "📲 one\n📲 two")] * 2
