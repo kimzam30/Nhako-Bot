@@ -24,15 +24,16 @@ A private Telegram assistant that runs entirely on your own hardware. A small lo
 | ⏰ **Overdue nudges** | — | Once a day at `OVERDUE_NUDGE_TIME`, tasks that just went overdue (each one only once) |
 | 🌐 **Web** | "search for Paper 1.21 release notes", paste any link | DuckDuckGo plus page reading, summarised with source links. Local-network addresses are refused |
 | 🎮 **Minecraft** | "who's on getgud?" | Player names and counts from a server-list ping |
-| 🐳 **Docker** | "is nextcloud healthy?", "how are my stacks?" | Per-stack health through a read-only, allowlisted socket proxy |
+| 🐳 **Docker** | "is nextcloud healthy?", "how are my stacks?" | Per-stack health through an allowlisted socket proxy |
 | 📝 **Notion tasks** | "add renew passport to my tasks by friday", "what's due this week?", "I finished the invoice", "move the landing page task to in progress", "remove the thumbnail task" | Every change asks first; removing moves the page to Notion's trash |
 | ✏️ **Task edits** | "push the bug fixes quest to friday", "make it a boss quest", "rename the thumbnail quest to File previews", "update bug fixes: half done" | A note also goes into the page body as a dated log; finished tasks can be reopened |
 | 🗺️ **Notion projects** | "how far along are my projects?", "what's left in Octomations?", "set Nhako Beam progress to 50%", "pause NeraOS", "start a new project called Nhako Radio" | Needs a relation from the tasks database to a projects database |
 | 🏆 **XP & pages** | "how much XP this week?", "what's my level?", "what's in my Nhako Depot page?" | XP comes from the database's own XP formula; pages are only those shared with the integration |
 | 📣 **Postiz** | "what's going out on social media this week?", "draft a tweet about the server wipe" | Saved as a **draft** after you confirm. The bot never publishes |
 | 📊 **Social stats** | "how did my posts do this week?", "how's my tiktok growing this month?" | Likes, comments and views per post (newest 5), and followers and views per channel. A digest arrives with the weekly review |
-| 📲 **TikTok inbox** | — | When Postiz sends a TikTok post to the TikTok app's inbox, a reminder to post it there before TikTok drops it 24 h later (`POSTIZ_TIKTOK_REMINDERS`) |
+| 📲 **TikTok post time** | — | A ping at the exact time each scheduled TikTok post goes out, so you can publish it from the TikTok app's inbox straight away (`POSTIZ_TIKTOK_REMINDERS`) |
 | 🧠 **Memory** | "remember that I'm allergic to prawns", "what do you know about me?" | Only saved when you ask. Passwords, PINs, keys and IC/card numbers are refused |
+| 🐳 **Docker control** | "restart nextcloud", "pause the postiz stack", "start homepage", "show vaultwarden logs", `/docker paused`, `/logs nextcloud 50` | Stop, restart and pause ask for a Confirm tap; start and resume run at once. `/docker` has tap-to-act buttons. `nhako` and its proxy can't be touched (`DOCKER_PROTECTED` for more) |
 | 🚨 **Alerts** | — | A message when a container crashes or turns unhealthy, a Minecraft server stops answering or Ollama goes down, and again when it recovers |
 | 🎙️ **Voice notes** | any of the above, spoken | Transcribed offline with faster-whisper on the CPU |
 
@@ -183,12 +184,13 @@ All settings come from `.env` (see [.env.example](.env.example)). Inside Docker,
 | `OVERDUE_NUDGE_TIME` | `18:00` | Daily overdue-task ping (24h), or `off` |
 | `MC_SERVERS` | `getgud=127.0.0.1:25565` | `name=host:port`, comma-separated |
 | `MC_ALERT_SERVERS` | `getgud` | Servers that alert when they stop answering |
-| `DOCKER_PROXY_URL` | *(empty)* | Read-only Docker socket proxy; empty disables `/docker` |
+| `DOCKER_PROXY_URL` | *(empty)* | Docker socket proxy (list, stats, logs, start/stop/restart/pause); empty disables `/docker` |
+| `DOCKER_PROTECTED` | *(empty)* | More container names the bot never stops, pauses or restarts (`nhako` and `nhako-docker-proxy` always are) |
 | `ALERTS` | `true` | Push homelab and Ollama alerts |
 | `ALERT_IGNORE` | *(empty)* | Container names never to alert about |
 | `NOTION_TOKEN`, `NOTION_TASKS_DB` | *(empty)* | Notion integration secret and tasks database |
 | `POSTIZ_URL`, `POSTIZ_API_KEY` | *(empty)* | Postiz backend URL and public API key |
-| `POSTIZ_TIKTOK_REMINDERS` | `true` | Ping when a TikTok upload is waiting in the TikTok app's inbox |
+| `POSTIZ_TIKTOK_REMINDERS` | `true` | Ping at each TikTok post's scheduled time to publish it from the TikTok app |
 | `GOOGLE_CREDENTIALS_FILE`, `GOOGLE_TOKEN_FILE` | `credentials.json`, `token.json` | File names inside `DATA_DIR` |
 | `WHISPER_MODEL` | `base` | `tiny`, `base` or `small` |
 | `WHISPER_LANGUAGE` | `en` | Language of your voice notes, or `auto` to let whisper guess |
@@ -205,7 +207,7 @@ A malformed `AGENDA_TIME` or `TIMEZONE` stops the bot at startup with a clear er
 - **One user.** Every handler, including button presses, checks `ALLOWED_USER_ID`.
 - **Nothing changes without a tap.** Moving or deleting events, completing tasks, forgetting facts and saving Postiz drafts all show Confirm / Cancel. A confirmation expires after 30 minutes and works only once.
 - **The web is data, not instructions.** Page text is labelled untrusted, and the model call that summarises it gets no tools, so a malicious page can't trigger an action. `read_url` refuses private, loopback and link-local addresses on every redirect hop.
-- **Docker is read-only and allowlisted.** The bot reaches Docker only through [wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy), which allows exactly `GET /containers/json` and `GET /containers/{id}/stats`, and only from the bot's container. Logs, file archives, inspect, images and any POST are refused.
+- **Docker is allowlisted.** The bot reaches Docker only through [wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy), which allows exactly `GET /containers/json`, `GET /containers/{id}/stats`, `GET /containers/{id}/logs` and `POST /containers/{id}/start|stop|restart|pause|unpause`, and only from the bot's container. Create, delete, exec, inspect, file archives, images, volumes and networks are refused. Stop, restart and pause need a Confirm tap, and the bot's own containers are never touched.
 - **Hardened containers.** Read-only root filesystem, all Linux capabilities dropped, `no-new-privileges`, non-root users, images pinned by digest, and memory limits that sacrifice the bot before any game server.
 - **Postiz drafts only.** The API key is organisation-wide, so the bot only lists posts and creates drafts. It never schedules or deletes.
 - **Secrets stay out.** `.env`, `data/` and the Google files are git- and docker-ignored. Memory refuses to store passwords, PINs, keys and ID or card numbers. Old messages are pruned daily.

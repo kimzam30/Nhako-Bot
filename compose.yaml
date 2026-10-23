@@ -38,9 +38,10 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # Read-only window onto Docker for /docker and the homelab alerts. An allowlist of exactly
-  # the two calls the bot makes: list containers, and one container's stats. Everything else
-  # (inspect, logs, file archives, images, any POST) is refused, and only the bot may connect.
+  # Narrow window onto Docker for /docker, /logs and the homelab alerts. An allowlist of exactly
+  # the calls the bot makes: list containers, one container's stats and log tail, and
+  # start/stop/restart/pause/unpause. Everything else (create, delete, exec, inspect, file
+  # archives, images, volumes, networks) is refused, and only the bot may connect.
   docker-proxy:
     image: wollomatic/socket-proxy:1@sha256:3935b709275e4ec35d6ed5a5c4a1f0d01ed31eec5e7234efc3357ecd47689002
     container_name: nhako-docker-proxy
@@ -50,7 +51,8 @@ services:
       - -allowfrom=nhako
       - -allowhealthcheck
       - -shutdowngracetime=5
-      - -allowGET=^(/v[0-9.]+)?/containers/(json|[0-9a-f]{12,64}/stats)$$
+      - -allowGET=^(/v[0-9.]+)?/containers/(json|[0-9a-f]{12,64}/(stats|logs))$$
+      - -allowPOST=^(/v[0-9.]+)?/containers/[0-9a-f]{12,64}/(start|stop|restart|pause|unpause)$$
     # Not root: Docker Desktop's socket is root:root 660, so the group is enough.
     user: "65534:985"
     read_only: true

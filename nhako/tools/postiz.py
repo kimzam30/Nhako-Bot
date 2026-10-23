@@ -1,5 +1,5 @@
 """Postiz (self-hosted social media scheduler): what's scheduled, post and channel stats,
-drafting posts, and a reminder when a TikTok upload is waiting in the TikTok app.
+drafting posts, and a ping at each TikTok post's time to publish it from the TikTok app.
 
 Uses Postiz's public API (Settings → Public API → API key). The key can do anything
 in the organisation, so the bot only ever reads posts and analytics and creates DRAFTS:
@@ -34,6 +34,8 @@ METRIC_ICON = {"like": "❤️", "comment": "💬", "share": "🔁", "repost": "
 # Channel metrics that are running totals (show the latest value); the others are per day (summed).
 RUNNING_TOTALS = ("follower", "subscriber", "fan", "following")
 INBOX_HOURS = 24  # TikTok throws away an inbox upload that isn't published within a day
+REFRESH_EVERY = dt.timedelta(minutes=5)  # how often the TikTok schedule is fetched from Postiz
+LOOKAHEAD = dt.timedelta(hours=6)        # how far ahead it is fetched
 NOTIFIED_KEY = "tiktok_notified"
 
 
@@ -246,29 +248,41 @@ async def weekly_digest(postiz: Postiz, now: dt.datetime) -> str | None:
 
 
 class TikTokWatch:
-    """Postiz sends TikTok posts with the UPLOAD method to the TikTok app's inbox and then marks them
-    PUBLISHED, but nothing is live until the user publishes it in the app (within 24 h). Postiz has
-    no 'waiting for you' flag, so: a TikTok post that turned PUBLISHED -> remind the user, once."""
+    """Postiz sends TikTok posts with the UPLOAD method to the TikTok app's inbox, and nothing is live
+    until the user publishes it there (within 24 h). So ping at each TikTok post's scheduled time, once.
+
+    Postiz's API is rate limited, so the schedule is fetched every REFRESH_EVERY and checked against
+    the clock on every scheduler tick: the ping lands within a tick of the post time."""
 
     def __init__(self, postiz: Postiz, store):
         self.postiz, self.store = postiz, store
+        self.schedule: list[dict] = []
+        self.refreshed: dt.datetime | None = None
+
+    async def refresh(self, now: dt.datetime) -> None:
+        self.refreshed = now  # first: a Postiz outage is retried at the next refresh, not every tick
+        posts = await self.postiz.posts(now - dt.timedelta(hours=INBOX_HOURS), now + LOOKAHEAD)
+        self.schedule = [p for p in posts if is_tiktok(p) and p.get("state") in ("QUEUE", "PUBLISHED", "ERROR")]
 
     async def check(self, now: dt.datetime) -> list[str]:
+        if self.refreshed is None or now - self.refreshed >= REFRESH_EVERY:
+            await self.refresh(now)
         notified: dict[str, str] = json.loads(await self.store.get(NOTIFIED_KEY) or "{}")
-        posts = await self.postiz.posts(now - dt.timedelta(hours=INBOX_HOURS), now + dt.timedelta(minutes=5))
         alerts = []
-        for p in posts:
-            if not is_tiktok(p) or p["id"] in notified or p.get("state") not in ("PUBLISHED", "ERROR"):
-                continue
+        for p in self.schedule:
             at = published_at(p).astimezone(now.tzinfo)
+            if at > now:
+                continue
             text = plain(p.get("content", ""), 90) or "(no caption)"
-            if p["state"] == "PUBLISHED":
+            if p["state"] == "ERROR":
+                if p["id"] + ":error" not in notified:
+                    alerts.append(f"❌ TikTok upload failed for “{text}” ({at:%a %H:%M}). Check it in Postiz.")
+                    notified[p["id"] + ":error"] = p["publishDate"]
+            elif p["id"] not in notified:
                 deadline = at + dt.timedelta(hours=INBOX_HOURS)
-                alerts.append(f"📲 TikTok: “{text}” is waiting in your TikTok inbox. Open TikTok and post it "
-                              f"before {deadline:%a %d %b %H:%M}.")
-            else:
-                alerts.append(f"❌ TikTok upload failed for “{text}” ({at:%a %H:%M}). Check it in Postiz.")
-            notified[p["id"]] = p["publishDate"]
+                alerts.append(f"📲 TikTok post time ({at:%H:%M}): “{text}”. Open TikTok and post it from your "
+                              f"inbox (TikTok keeps it until {deadline:%a %H:%M}).")
+            notified.setdefault(p["id"], p["publishDate"])  # a failed post needs no "post it now" ping too
         cutoff = now - dt.timedelta(days=3)
         notified = {k: v for k, v in notified.items()
                     if dt.datetime.fromisoformat(v.replace("Z", "+00:00")) > cutoff}

@@ -3,7 +3,7 @@ import httpx
 import pytest
 
 from nhako.monitor import Monitor
-from nhako.tools import homelab
+from nhako.tools import NeedsConfirm, homelab
 from nhako.tools.homelab import Container, Docker, MCStatus
 
 # A snapshot shaped like the real `docker ps -a` on kimmain (2026-10-19).
@@ -209,3 +209,158 @@ async def test_monitor_alerts_when_ollama_goes_down_and_comes_back(store):
     assert await m.check() == []  # one failed check is just a blip
     assert await m.check() == ["🔴 Ollama: can't reach Ollama. Commands like /today and /mc still work."]
     assert await m.check() == ["✅ Ollama is back, I can think again"]
+
+
+# --- control: start/stop/restart/pause/unpause, logs, routing ---
+
+CONTROL_PS = PS + [("nhako", "nhako", "running", "Up 8 hours (healthy)"),
+                   ("postiz-redis", "postiz", "running", "Up 4 days (healthy)"),
+                   ("beszel", "beszel", "paused", "Up 2 hours (Paused)"),
+                   ("rustdesk-hbbs", "rustdesk", "created", "Created")]
+
+
+class FakeDockerAPI:
+    """List, logs and actions; an action really changes the state, like Docker would."""
+    def __init__(self, ps=CONTROL_PS, log=b""):
+        self.rows = {n: [n, p, st, s] for n, p, st, s in ps}
+        self.log, self.actions = log, []
+
+    def __call__(self, req: httpx.Request):
+        path = req.url.path
+        if path == "/containers/json":
+            return httpx.Response(200, json=api_rows([tuple(r) for r in self.rows.values()]))
+        name = path.split("/")[2].removeprefix("id-")
+        if path.endswith("/logs"):
+            assert req.url.params["tail"] and req.url.params["stderr"] == "1"
+            return httpx.Response(200, content=self.log)
+        verb = path.rsplit("/", 1)[1]
+        assert req.method == "POST" and name in self.rows
+        self.actions.append((verb, name, dict(req.url.params)))
+        state = {"start": "running", "restart": "running", "unpause": "running", "stop": "exited", "pause": "paused"}[verb]
+        self.rows[name][2:] = [state, {"exited": "Exited (0) Less than a second ago",
+                                       "paused": "Up 4 days (Paused)"}.get(state, "Up Less than a second")]
+        return httpx.Response(204)
+
+
+@pytest.fixture
+def api():
+    return FakeDockerAPI()
+
+
+@pytest.fixture
+def control(ctx, api):
+    client = Docker("http://proxy:2375", transport=httpx.MockTransport(api))
+    return client, {t.name: t for t in homelab.tools(ctx, client)}
+
+
+def said(ctx, text):
+    import dataclasses
+    return dataclasses.replace(ctx, text=text)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("restart nextcloud", ("restart", "nextcloud")),
+    ("please stop the postiz stack", ("stop", "postiz")),
+    ("can you resume beszel", ("unpause", "beszel")),
+    ("unpause beszel", ("unpause", "beszel")),
+    ("turn on the homepage container", ("start", "homepage")),
+    ("matikan nextcloud", ("stop", "nextcloud")),
+    ("show postiz logs", ("logs", "postiz")),
+    ("logs for vaultwarden", ("logs", "vaultwarden")),
+])
+def test_parse_command(text, expected):
+    assert homelab.parse_command(text)[0] == expected
+
+
+@pytest.mark.parametrize("text", ["is nextcloud stopped?", "which containers are paused", "how are my stacks",
+                                  "write a blog post"])
+def test_status_questions_are_not_commands(text):
+    assert homelab.parse_command(text) == []
+
+
+def test_resolve_exact_name_stack_and_prefix():
+    containers = [Container(n, p, st, s, id=f"id-{n}") for n, p, st, s in CONTROL_PS]
+    names = lambda cs: [c.name for c in cs]
+    assert names(homelab.resolve(containers, "postiz")) == ["postiz"]
+    assert names(homelab.resolve(containers, "postiz", whole_stack=True)) == ["postiz", "postiz-redis"]
+    assert names(homelab.resolve(containers, "kimzamwrld")) == ["kimzam-server", "kimzam-backup"]
+    assert names(homelab.resolve(containers, "kimzam")) == ["kimzam-server", "kimzam-backup"]
+    assert homelab.resolve(containers, "neraos") == []
+
+
+async def test_start_runs_straight_away(control, api, ctx):
+    _, tools = control
+    out = await tools["docker_control"].run({}, said(ctx, "start homepage"))
+    assert out.text == "🟢 homepage started: Up Less than a second"
+    assert api.actions == [("start", "homepage", {})]
+
+
+async def test_stop_waits_for_confirm(control, api, ctx):
+    _, tools = control
+    ask = await tools["docker_control"].run({"name": "nextcloud", "action": "stop"}, said(ctx, "stop nextcloud"))
+    assert isinstance(ask, NeedsConfirm) and ask.prompt == "🐳 Stop nextcloud?" and api.actions == []
+    done = await tools["docker_control"].execute(ask.args, ctx)
+    assert done.text == "⚪ nextcloud stopped: Exited (0) Less than a second ago"
+    assert api.actions == [("stop", "nextcloud", {"t": "10"})]
+
+
+async def test_whole_stack_one_confirm(control, api, ctx):
+    _, tools = control
+    ask = await tools["docker_control"].run({}, said(ctx, "restart the postiz stack"))
+    assert ask.prompt == "🐳 Restart 2 containers (postiz, postiz-redis)?"
+    await tools["docker_control"].execute(ask.args, ctx)
+    assert [a[:2] for a in api.actions] == [("restart", "postiz"), ("restart", "postiz-redis")]
+
+
+async def test_protected_and_wrong_state(control, api, ctx):
+    _, tools = control
+    assert "🔒 nhako is protected" in (await tools["docker_control"].run({}, said(ctx, "restart nhako"))).text
+    assert "nextcloud is running; nothing to start" in (await tools["docker_control"].run({}, said(ctx, "start nextcloud"))).text
+    assert "🟢 beszel resumed" in (await tools["docker_control"].run({}, said(ctx, "resume beszel"))).text
+    assert api.actions == [("unpause", "beszel", {})]
+
+
+async def test_model_args_never_act_without_a_verb_from_the_user(control, api, ctx):
+    _, tools = control
+    out = await tools["docker_control"].run({"name": "nextcloud", "action": "stop"}, said(ctx, "is nextcloud ok?"))
+    assert out.text.startswith("🟢 nextcloud") and api.actions == []
+
+
+async def test_status_tool_does_what_was_asked(control, api, ctx):
+    _, tools = control
+    ask = await tools["docker_status"].run({"name": "nextcloud"}, said(ctx, "pause nextcloud"))
+    assert isinstance(ask, NeedsConfirm) and ask.args["verb"] == "pause"
+
+
+async def test_state_filter(control, ctx):
+    _, tools = control
+    assert (await tools["docker_status"].run({"state": "paused"}, ctx)).text == "🐳 1 paused:\n⚪ beszel: Up 2 hours (Paused)"
+    assert "rustdesk-hbbs" in (await tools["docker_status"].run({"state": "created"}, ctx)).text
+
+
+def test_demux_and_ansi():
+    frame = lambda stream, text: bytes([stream, 0, 0, 0]) + len(text).to_bytes(4, "big") + text
+    raw = frame(1, b"\x1b[32mready\x1b[0m\n") + frame(2, b"warn: slow\n")
+    assert homelab.demux(raw) == "ready\nwarn: slow\n"
+    assert homelab.demux(b"plain tty output\n") == "plain tty output\n"
+
+
+async def test_logs(ctx):
+    api = FakeDockerAPI(log=bytes([1, 0, 0, 0, 0, 0, 0, 6]) + b"hello\n")
+    tools = {t.name: t for t in homelab.tools(ctx, Docker("http://proxy:2375", transport=httpx.MockTransport(api)))}
+    assert (await tools["docker_logs"].run({"name": "nextcloud"}, ctx)).text == "📜 nextcloud, last lines:\nhello"
+    assert (await tools["docker_control"].run({}, said(ctx, "show vaultwarden logs"))).text.startswith("I couldn't tell")
+
+
+async def test_claim_routes_real_containers_only(control, ctx):
+    client, _ = control
+    check = homelab.claim(client)
+    assert await check("restart nextcloud", ctx) == "homelab"
+    assert await check("pause NeraOS", ctx) is None            # a Notion project, not a container
+    assert await check("start a new project called Nhako Radio", ctx) is None
+    assert await check("pause Nhako Beam", ctx) is None        # also a project; nhako itself is protected
+    assert await check("is nextcloud healthy?", ctx) is None   # status: the router handles it
+
+
+def test_guess_action_goes_to_control():
+    assert homelab.guess("restart nextcloud") == ("docker_control", {})

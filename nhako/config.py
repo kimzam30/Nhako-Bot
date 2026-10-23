@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     docker_proxy_url: str = ""          # read-only docker-socket-proxy, set in compose.yaml
     alerts: bool = True                 # push a message when a container/server breaks
     alert_ignore: str = ""              # comma-separated container names to never alert on
+    docker_protected: str = ""          # more container names the bot never stops/pauses/restarts
     mc_alert_servers: str = "getgud"    # servers that should always be up
 
     # Integrations (Phase 5). Unset: the bot says how to set them up.

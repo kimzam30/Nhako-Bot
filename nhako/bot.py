@@ -27,7 +27,7 @@ from .llm import LLM
 from .monitor import Monitor
 from .speech import Transcriber
 from .store import Store
-from .tools import default_registry
+from .tools import default_registry, homelab
 from .tools.calendar import GoogleCalendar, agenda
 from .tools.homelab import Docker, docker_report, mc_report, parse_servers
 from .tools.notion import Notion, morning_tasks, overdue_nudge, projects_report, stats_text, tasks_report, weekly_review
@@ -36,7 +36,6 @@ from .tools.postiz import Postiz, TikTokWatch, weekly_digest
 log = logging.getLogger(__name__)
 
 TELEGRAM_LIMIT = 4096
-TIKTOK_EVERY_TICKS = 15  # Postiz polled for TikTok inbox uploads every ~5 minutes
 
 HELP = """I'm Nhako, running locally on {model}.
 
@@ -52,13 +51,15 @@ Just talk to me (text or voice):
 • "how far along are my projects?" / "set Nhako Beam progress to 50%" / "pause NeraOS" / "how much XP this week?"
 • "what's in the Nhako Depot page?"
 • "remember that I prefer meetings after 10am" / "what do you know about me?"
+• "restart nextcloud" / "pause the postiz stack" / "show vaultwarden logs"
 • "what's going out on social media this week?" / "draft a tweet about the server wipe" (saved as a draft)
 • "how did my tiktoks do this week?" / "how many followers did I gain this month?"
 
 /today [tomorrow, this week, ...] lists your calendar instantly
 /reminders shows reminders you can cancel
 /mc [server] shows who's online
-/docker [name] shows your containers
+/docker [name, running, paused, stopped, created] shows your containers, tap one to start/stop/restart it
+/logs name [lines] shows the end of a container's log
 /tasks [today, this week, overdue, in progress] lists your open Notion tasks
 /projects [all] shows your Notion projects and how far along they are
 /stats [this week, this month, all time] shows tasks cleared, XP and your level
@@ -74,7 +75,8 @@ COMMANDS = [
     BotCommand("stats", "Tasks cleared, XP and level (or: this month, all time)"),
     BotCommand("reminders", "Upcoming reminders, tap to cancel"),
     BotCommand("mc", "Who's online on the Minecraft servers"),
-    BotCommand("docker", "Container and stack health"),
+    BotCommand("docker", "Containers: health, start/stop/restart (or: running, paused...)"),
+    BotCommand("logs", "The end of a container's log"),
     BotCommand("memory", "What I remember about you"),
     BotCommand("ping", "Check the model and integrations"),
     BotCommand("help", "What I can do"),
@@ -145,6 +147,38 @@ def reminder_buttons(reminders, tz) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(
         f"❌ {r.due_at.astimezone(tz):%a %d %b %H:%M} {r.text}"[:60], callback_data=f"rm:{r.id}")]
         for r in reminders[:20]])
+
+
+DOCKER_FILTERS = [("🟢 Running", "running"), ("⏸ Paused", "paused"), ("⚪ Stopped", "stopped"),
+                  ("🆕 Created", "created"), ("🐳 All", "all")]
+DOCKER_VERBS = [("start", "▶️ Start"), ("unpause", "⏯ Resume"), ("restart", "🔁 Restart"), ("pause", "⏸ Pause"),
+                ("stop", "⏹ Stop")]
+
+
+def docker_list_buttons(containers) -> InlineKeyboardMarkup:
+    """One button per container (two per row), then the state filters. callback: dk:p:<short id>."""
+    buttons = [InlineKeyboardButton(f"{c.icon()} {c.name}"[:40], callback_data=f"dk:p:{c.id[:12]}")
+               for c in containers[:40]]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(label, callback_data=f"dk:l:{state}") for label, state in DOCKER_FILTERS])
+    return InlineKeyboardMarkup(rows)
+
+
+def docker_panel(c, protected: set[str]) -> InlineKeyboardMarkup:
+    """The actions that make sense for this container's state, plus logs and a way back."""
+    verbs = [] if c.name in protected else [(v, label) for v, label in DOCKER_VERBS if c.state in homelab.VALID[v]]
+    act = [InlineKeyboardButton(label, callback_data=f"dk:a:{v}:{c.id[:12]}") for v, label in verbs]
+    rows = [act[i:i + 3] for i in range(0, len(act), 3)]
+    rows.append([InlineKeyboardButton("📜 Logs", callback_data=f"dk:g:{c.id[:12]}"),
+                 InlineKeyboardButton("🔄 Refresh", callback_data=f"dk:p:{c.id[:12]}"),
+                 InlineKeyboardButton("⬅️ All", callback_data="dk:l:all")])
+    return InlineKeyboardMarkup(rows)
+
+
+def docker_line(c, protected: set[str]) -> str:
+    lock = " 🔒" if c.name in protected else ""
+    problem = f" ⚠️ {c.problem()}" if c.problem() else ""
+    return f"{c.icon()} {c.name}{lock} ({c.project or 'no stack'}): {c.status}{problem}"
 
 
 def memory_buttons(facts) -> InlineKeyboardMarkup:
@@ -247,7 +281,7 @@ def build_app(settings: Settings) -> Application:
                                   weekday=review[0]))
     watchers: list[scheduler.Watcher] = []
     if postiz is not None and settings.postiz_tiktok_reminders:
-        watchers.append(scheduler.Watcher(TIKTOK_EVERY_TICKS, TikTokWatch(postiz, store).check))
+        watchers.append(scheduler.Watcher(1, TikTokWatch(postiz, store).check))  # every tick; fetches every 5 min
 
     async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, await agenda(cal, ctx, " ".join(context.args) or "today"))
@@ -256,13 +290,85 @@ def build_app(settings: Settings) -> Application:
         await send(update, await mc_report(servers, " ".join(context.args)) if servers
                    else "No Minecraft servers configured (MC_SERVERS).")
 
+    protected = homelab.protected_names(settings)
+
+    async def docker_view(state: str):
+        """-> (text, buttons) for /docker running|paused|stopped|created|all."""
+        containers = await docker.containers()
+        if state == "all":
+            return homelab.stack_summary(containers), docker_list_buttons(containers)
+        hits = homelab.filter_containers(containers, state)
+        return (f"🐳 {len(hits)} {state}:" if hits else f"🐳 No {state} containers."), docker_list_buttons(hits)
+
     async def docker_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if docker is None:
             return await send(update, "Docker status isn't set up (DOCKER_PROXY_URL).")
+        wanted = " ".join(context.args)
         try:
-            await send(update, await docker_report(docker, " ".join(context.args)))
+            if wanted.lower() in homelab.STATE_FILTERS or wanted.lower() == "all":
+                text, buttons = await docker_view(wanted.lower())
+                return await send(update, text, buttons)
+            if not wanted:
+                text = homelab.stack_summary(await docker.containers()) + "\n\nTap a filter to pick a container:"
+                return await send(update, text, docker_list_buttons([]))
+            hits = homelab.match_containers(await docker.containers(), wanted)
+            await send(update, await docker_report(docker, wanted), docker_list_buttons(hits) if hits else None)
         except Exception as e:
             log.warning("docker proxy failed: %r", e)
+            await send(update, "I couldn't reach Docker (is nhako-docker-proxy running?).")
+
+    async def logs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if docker is None:
+            return await send(update, "Docker isn't set up (DOCKER_PROXY_URL).")
+        if not context.args:
+            return await send(update, "Which container? e.g. /logs nextcloud 50")
+        lines = int(context.args[-1]) if len(context.args) > 1 and context.args[-1].isdigit() else homelab.LOG_LINES
+        name = " ".join(a for a in context.args if not (a.isdigit() and len(context.args) > 1))
+        try:
+            hits = homelab.resolve(await docker.containers(), name)
+            if len(hits) != 1:
+                return await send(update, f"Logs of which one? {', '.join(c.name for c in hits)}" if hits
+                                  else f"No container called “{name}”. Try /docker all")
+            await send(update, homelab.logs_text(hits[0].name, await docker.logs(hits[0], min(lines, 200))))
+        except Exception as e:
+            log.warning("docker logs failed: %r", e)
+            await send(update, "I couldn't read that log (is nhako-docker-proxy running?).")
+
+    async def on_docker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """dk:l:<state> list, dk:p:<id> panel, dk:a:<verb>:<id> act (or ask), dk:y:<verb>:<id> confirmed,
+        dk:g:<id> logs."""
+        query = update.callback_query
+        await query.answer()
+        if query.from_user.id != settings.allowed_user_id or docker is None:
+            return
+        _, kind, *rest = query.data.split(":")
+        try:
+            if kind == "l":
+                text, buttons = await docker_view(rest[0])
+                return await query.edit_message_text(text, reply_markup=buttons)
+            c = next((c for c in await docker.containers() if c.id.startswith(rest[-1])), None)
+            if c is None:
+                return await query.edit_message_text("That container is gone.", reply_markup=docker_list_buttons([]))
+            if kind == "g":
+                return await send(update, homelab.logs_text(c.name, await docker.logs(c)))
+            if kind == "a" and rest[0] in homelab.CONFIRM:
+                verb = rest[0]
+                return await query.edit_message_text(
+                    f"{docker_line(c, protected)}\n\n{verb.capitalize()} {c.name}?",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton(f"✅ Yes, {verb}", callback_data=f"dk:y:{verb}:{c.id[:12]}"),
+                        InlineKeyboardButton("↩️ No", callback_data=f"dk:p:{c.id[:12]}")]]))
+            note = ""
+            if kind in ("a", "y"):
+                ok, skipped = homelab.check_targets(rest[0], [c], protected)
+                note = await homelab.run_action(docker, rest[0], ok) if ok else "\n".join(skipped)
+                c = next((x for x in await docker.containers() if x.id == c.id), c)
+            text = docker_line(c, protected) + (f"\n\n{note}" if note else "")
+            await query.edit_message_text(text, reply_markup=docker_panel(c, protected))
+        except BadRequest as e:  # "message is not modified" after a Refresh with nothing new
+            log.debug("docker panel: %s", e)
+        except httpx.HTTPError as e:
+            log.warning("docker button failed: %r", e)
             await send(update, "I couldn't reach Docker (is nhako-docker-proxy running?).")
 
     async def reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -383,6 +489,7 @@ def build_app(settings: Settings) -> Application:
     app.add_handler(CommandHandler("reminders", reminders, filters=me))
     app.add_handler(CommandHandler("mc", mc, filters=me))
     app.add_handler(CommandHandler("docker", docker_cmd, filters=me))
+    app.add_handler(CommandHandler("logs", logs_cmd, filters=me))
     app.add_handler(CommandHandler("tasks", tasks_cmd, filters=me))
     app.add_handler(CommandHandler("projects", projects_cmd, filters=me))
     app.add_handler(CommandHandler("stats", stats_cmd, filters=me))
@@ -391,6 +498,7 @@ def build_app(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no):\d+$"))
     app.add_handler(CallbackQueryHandler(on_cancel_reminder, pattern=r"^rm:\d+$"))
     app.add_handler(CallbackQueryHandler(on_forget_fact, pattern=r"^mem:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_docker, pattern=r"^dk:[lpayg]:"))
     app.add_handler(MessageHandler(~me, denied))
     app.add_error_handler(on_error)
     return app

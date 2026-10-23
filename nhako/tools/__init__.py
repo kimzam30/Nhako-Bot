@@ -104,7 +104,10 @@ def default_registry(ctx: Context, cal=None, docker=None, notion=None, postiz=No
     reg = Registry()
     reg.add("schedule", calendar.tools(ctx, cal) + reminders.tools(ctx))
     reg.add("web", web.tools(ctx))
-    reg.add("homelab", homelab.tools(ctx, docker), fallback=homelab.guess)
+    if docker is None and ctx.settings.docker_proxy_url:
+        docker = homelab.Docker(ctx.settings.docker_proxy_url)
+    # Before Notion's claim: "pause nextcloud" is a container, "pause NeraOS" (no such container) a project.
+    reg.add("homelab", homelab.tools(ctx, docker), fallback=homelab.guess, claim=homelab.claim(docker))
     # One category for tasks and projects: a separate "projects" category made the 2B router send
     # task messages to schedule/memory/homelab (live tests, Oct 2026).
     reg.add("notion", notion_tools.tools(ctx, notion) + notion_tools.project_tools(ctx, notion),

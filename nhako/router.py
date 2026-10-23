@@ -16,7 +16,8 @@ CATEGORIES = {
                 "(even vaguely named, like 'the dentist thing'), list events, 'am I free', 'remind me'",
     "web": "needs current information from the internet (news, prices, weather, releases), or a URL",
     "homelab": "LIVE STATUS checks of the user's own servers: is the Minecraft server 'getgud' up, "
-               "who is online, are their Docker containers (nextcloud, postiz, vaultwarden...) healthy",
+               "who is online, are their Docker containers (nextcloud, postiz, vaultwarden...) healthy; "
+               "start, stop, restart or pause a container, or show its logs",
     "postiz": "the user's social media (Postiz): what posts are scheduled or published, "
               "stats of their posts or accounts (views, likes, followers), "
               "write/draft a post, tweet, LinkedIn, Instagram or TikTok caption "
@@ -39,6 +40,7 @@ EXAMPLES = [
     ("what should I put on a birthday card", "chat"),
     ("is vaultwarden running ok?", "homelab"),
     ("is postiz down?", "homelab"),
+    ("reboot the vaultwarden container", "homelab"),
     ("how many people are on the minecraft server", "homelab"),
     ("put lunch with Aiman on thursday 1pm", "schedule"),
     ("ada apa-apa esok?", "schedule"),

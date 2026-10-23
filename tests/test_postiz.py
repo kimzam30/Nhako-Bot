@@ -272,16 +272,38 @@ async def test_rate_limited(ctx):
     assert "limit is used up" in (await t["channel_stats"].run({}, ctx)).text
 
 
-async def test_tiktok_watch_reminds_once(social, store):
+async def test_tiktok_watch_pings_at_post_time_once(social, store):
     client = client_for(social)
     assert await postiz.TikTokWatch(client, store).check(NOW) == [
         "❌ TikTok upload failed for “Wipe clip” (Sun 18:00). Check it in Postiz.",
-        "📲 TikTok: “Season 2 trailer” is waiting in your TikTok inbox. Open TikTok and post it before "
-        "Tue 20 Oct 06:00.",
-    ]  # the queued TikTok and the X posts: nothing
+        "📲 TikTok post time (06:00): “Season 2 trailer”. Open TikTok and post it from your inbox "
+        "(TikTok keeps it until Tue 06:00).",
+    ]  # t3 is due in 3 minutes, and X posts are never pinged
     _, _, params, _ = social.requests[-1]
-    assert params == {"startDate": "2026-10-17T23:30:00+00:00", "endDate": "2026-10-18T23:35:00+00:00"}
+    assert params == {"startDate": "2026-10-17T23:30:00+00:00", "endDate": "2026-10-19T05:30:00+00:00"}
     assert await postiz.TikTokWatch(client, store).check(NOW) == []  # not again, even after a restart
+
+
+async def test_tiktok_watch_pings_a_queued_post_on_time_without_extra_requests(social, store):
+    social.posts = [SOCIAL_POSTS[2]]  # t3: QUEUE at 23:33 UTC, NOW is 23:30
+    watch = postiz.TikTokWatch(client_for(social), store)
+    assert await watch.check(NOW) == []
+    assert await watch.check(NOW + dt.timedelta(minutes=2, seconds=40)) == []
+    pinged = await watch.check(NOW + dt.timedelta(minutes=3))
+    assert pinged == ["📲 TikTok post time (07:33): “Later”. Open TikTok and post it from your inbox "
+                      "(TikTok keeps it until Tue 07:33)."]
+    assert await watch.check(NOW + dt.timedelta(minutes=3, seconds=20)) == []
+    assert len([r for r in social.requests if r[1].endswith("/posts")]) == 1  # one fetch per 5 minutes
+    await watch.check(NOW + dt.timedelta(minutes=5))
+    assert len([r for r in social.requests if r[1].endswith("/posts")]) == 2
+
+
+async def test_tiktok_watch_failure_after_ping(social, store):
+    social.posts = [{**SOCIAL_POSTS[2], "publishDate": "2026-10-18T23:00:00.000Z"}]
+    watch = postiz.TikTokWatch(client_for(social), store)
+    assert len(await watch.check(NOW)) == 1
+    social.posts = [{**social.posts[0], "state": "ERROR"}]
+    assert (await watch.check(NOW + dt.timedelta(minutes=5)))[0].startswith("❌ TikTok upload failed for “Later”")
 
 
 async def test_tiktok_watch_forgets_old_posts(social, store):
